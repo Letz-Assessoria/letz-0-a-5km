@@ -131,6 +131,8 @@ async function wipe() {
   await fetch(`${fake.url}/__reset`, { method: 'POST' });
 }
 
+const alerts = async () => (await db.collection('alerts').get()).docs.map((d) => d.data());
+
 describe('cadastro, retomada e webhook', () => {
   before(async () => {
     assert.ok(WEBHOOK_TOKEN, 'functions/.secret.local precisa de ASAAS_WEBHOOK_TOKEN');
@@ -407,14 +409,23 @@ describe('cadastro, retomada e webhook', () => {
     assert.equal((await get(ipDoc('203.0.113.5'))).count, 20);
   });
 
-  it('signup: válvula global de 300/h bloqueia qualquer IP e conta cada inscrição', async () => {
-    const ok = await call('signup', person(), null, { 'x-forwarded-for': '203.0.113.50' });
-    assert.equal(ok.error, undefined, JSON.stringify(ok.error));
-    assert.equal((await get('rateLimits/signup_global')).count, 1);
-    await seedLimit('rateLimits/signup_global', 300);
+  it('signup: limite global não bloqueia compradores', async () => {
+    await seedLimit('rateLimits/signup_success', 500);
+    await seedLimit('rateLimits/signup_global', 9999); // doc antigo, ignorado
     const r = await call('signup', person(), null, { 'x-forwarded-for': '203.0.113.51' });
-    assert.equal(r.error.status, 'RESOURCE_EXHAUSTED');
-    assert.equal(r.error.message, 'Muitas tentativas. Tente de novo em alguns minutos.');
+    assert.equal(r.error, undefined, JSON.stringify(r.error));
+  });
+
+  it('signup: pico de cadastros gera alerta sem bloquear', async () => {
+    await seedLimit('rateLimits/signup_success', 300);
+    const one = await call('signup', person(), null, { 'x-forwarded-for': '203.0.113.60' });
+    const two = await call('signup', person(), null, { 'x-forwarded-for': '203.0.113.61' });
+    assert.equal(one.error, undefined, JSON.stringify(one.error));
+    assert.equal(two.error, undefined, JSON.stringify(two.error));
+    const spikes = (await alerts()).filter((a) => a.type === 'signup-spike');
+    assert.equal(spikes.length, 1);
+    assert.equal(spikes[0].count, 301);
+    assert.equal(spikes[0].resolved, false);
   });
 
   it('signup: x-forwarded-for forjado não burla o limite', async () => {
@@ -680,8 +691,6 @@ describe('cadastro, retomada e webhook', () => {
     assert.equal((await get('checkouts/' + other)).status, 'paid');
   });
 
-  const alerts = async () => (await db.collection('alerts').get()).docs.map((d) => d.data());
-
   it('webhook: uid desconhecido responde 200 e gera alerta unknown-uid', async () => {
     assert.equal((await hook(payment('pixReceived', 'checkout-que-nao-existe'))).status, 200);
     assert.equal((await alerts()).length, 0); // checkout desconhecido, sem uid: não é nosso
@@ -718,6 +727,30 @@ describe('cadastro, retomada e webhook', () => {
     assert.equal((await get('users/' + uid)).access, 'blocked');
     assert.equal((await get(`users/${uid}/private/billing`)).status, 'rejected');
     assert.equal((await get('checkouts/' + checkoutId)).status, 'rejected');
+  });
+
+  it('webhook: rejeitado de checkout ainda aberto não o fecha e o pagamento seguinte ativa', async () => {
+    const { uid, checkoutId } = await signupOk();
+    await hook(payment('cardConfirmed', checkoutId, { event: 'PAYMENT_REPROVED_BY_RISK_ANALYSIS' }));
+    assert.equal((await get('checkouts/' + checkoutId)).status, 'active');
+    assert.equal((await get('users/' + uid)).access, 'pending');
+    assert.equal((await hook(payment('cardConfirmed', checkoutId))).status, 200);
+    assert.equal((await get('users/' + uid)).access, 'active');
+  });
+
+  it('webhook: pago em checkout já fechado gera alerta', async () => {
+    const { uid, checkoutId } = await signupOk();
+    await hook(payment('cardConfirmed', checkoutId));
+    await hook(payment('cardConfirmed', checkoutId, { event: 'PAYMENT_REPROVED_BY_RISK_ANALYSIS' }));
+    assert.equal((await get('users/' + uid)).access, 'blocked');
+    const e = payment('pixReceived', checkoutId);
+    await hook(e);
+    assert.equal((await get('users/' + uid)).access, 'blocked');
+    const list = (await alerts()).filter((a) => a.type === 'paid-closed-checkout');
+    assert.equal(list.length, 1);
+    assert.equal(list[0].uid, uid);
+    assert.equal(list[0].checkoutId, checkoutId);
+    assert.equal(list[0].eventId, e.id);
   });
 
   it('webhook: captura recusada do cartão também bloqueia', async () => {

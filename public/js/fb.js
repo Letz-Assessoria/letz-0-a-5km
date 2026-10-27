@@ -30,10 +30,10 @@ const DEV = {
 };
 const LOCAL = { apiKey: 'fake-api-key', authDomain: 'localhost', projectId: 'demo-letz', storageBucket: 'demo-letz.appspot.com' };
 
-const host = location.hostname;
-const local = host === 'localhost' || host === '127.0.0.1';
-const config = local ? LOCAL
-  : (host.startsWith('letz-0-aos-5km-dev.') || host.startsWith('letz-0-aos-5km--')) ? DEV : PROD; // domínio desconhecido = PROD
+// LetzCore (lib/core.js) é carregado antes deste módulo; domínio desconhecido = PROD.
+const where = window.LetzCore.projectForHost(location.hostname);
+const config = where === 'local' ? LOCAL : where === 'dev' ? DEV : PROD;
+const local = where === 'local';
 
 const app = initializeApp(config);
 const auth = getAuth(app);

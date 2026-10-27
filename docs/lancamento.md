@@ -199,7 +199,7 @@ Além disso, o painel do treinador mostra "Atenção: N alertas de pagamento" (c
 5. Trocar foto de perfil e anexar foto no treino (prova da permissão do passo 5).
 6. Estornar o pagamento no Asaas: a conta passa a "Bloqueado" e o aluno perde o acesso.
 7. Treinador: entrar, abrir Atletas (sem alertas pendentes), abrir Feed e Medalhas.
-8. **IP do rate limit** (premissa não verificada): o cadastro usa o último salto de `x-forwarded-for` como IP do cliente. Faça dois cadastros de teste de redes diferentes (Wi-Fi e dados móveis) e confira que aparecem **dois** documentos `rateLimits/signup_<hash>` diferentes, cada um com `count: 1`. Se aparecer um só, o salto está errado: troque para o penúltimo salto ou `rawRequest.ip` em `functions/src/signup.js` (`clientIp`) antes de abrir as vendas. Limites atuais: 20 cadastros por IP por hora e 300 por hora no total (`rateLimits/signup_global`); acima disso o app mostra "Muitas tentativas".
+8. **IP do rate limit** (premissa não verificada): o cadastro usa o último salto de `x-forwarded-for` como IP do cliente. Faça dois cadastros de teste de redes diferentes (Wi-Fi e dados móveis) e confira que aparecem **dois** documentos `rateLimits/signup_<hash>` diferentes, cada um com `count: 1`. Se aparecer um só, o salto está errado: troque para o penúltimo salto ou `rawRequest.ip` em `functions/src/signup.js` (`clientIp`) antes de abrir as vendas. Único limite que bloqueia: 20 tentativas por IP por hora (o app mostra "Muitas tentativas"). Além disso, mais de 300 cadastros concluídos na mesma hora geram um alerta `signup-spike` no painel (só aviso, nunca recusa ninguém).
 
 Apague os dados de teste depois (usuário no Auth, `users/{uid}`, `cpfs/{cpf}`, `handles/{h}`).
 

@@ -51,7 +51,17 @@
 
   function cleanHandle(v) { return v.toLowerCase().replace(/^@+/, '').replace(/[^a-z0-9._]/g, '').slice(0, 30); }
 
+  // Projeto do Firebase por host. Só o site/preview de DEV usa dev; qualquer outro
+  // domínio (inclusive previews de prod "letz-0-aos-5km--...") é PROD.
+  function projectForHost(host) {
+    host = String(host || '');
+    if (host === 'localhost' || host === '127.0.0.1') return 'local';
+    if (host.indexOf('letz-0-aos-5km-dev.') === 0 || host.indexOf('letz-0-aos-5km-dev--') === 0) return 'dev';
+    return 'prod';
+  }
+
   return {
+    projectForHost: projectForHost,
     WEEK_MS: WEEK_MS, DEFAULT_START_ISO: DEFAULT_START_ISO,
     weekOpen: weekOpen, weekIndex: weekIndex, pointedKeys: pointedKeys, pointsFor: pointsFor,
     isConcluded: isConcluded, isValidCpf: isValidCpf, normalizeCpf: normalizeCpf,

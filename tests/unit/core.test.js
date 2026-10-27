@@ -46,3 +46,13 @@ test('normalizePhone', () => {
 test('cleanHandle', () => {
   assert.equal(cleanHandle('@@Fe.Lipe!x'), 'fe.lipex');
 });
+
+test('projectForHost: dev, preview de dev, prod, preview de prod, domínio próprio e local', () => {
+  assert.equal(core.projectForHost('letz-0-aos-5km-dev.web.app'), 'dev');
+  assert.equal(core.projectForHost('letz-0-aos-5km-dev--pr1-abc.web.app'), 'dev');
+  assert.equal(core.projectForHost('letz-0-aos-5km.web.app'), 'prod');
+  assert.equal(core.projectForHost('letz-0-aos-5km--pr1-abc.web.app'), 'prod');
+  assert.equal(core.projectForHost('www.exemplo.com.br'), 'prod');
+  assert.equal(core.projectForHost('localhost'), 'local');
+  assert.equal(core.projectForHost('127.0.0.1'), 'local');
+});

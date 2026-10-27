@@ -26,8 +26,15 @@ function tokenOk(given, expected) {
 // Aplica um evento 'paid'. Devolve uma descrição curta do que fez (para o log).
 function applyPaid(tx, refs, ev, { billing, checkout }, alert) {
   const now = FieldValue.serverTimestamp();
-  if (checkout && CLOSED.has(checkout.status)) return 'pago atrasado de checkout já ' + checkout.status;
-  if (CLOSED.has(billing.status) && billing.checkoutId === ev.checkoutId) return 'pago atrasado: billing já ' + billing.status;
+  // Dinheiro recebido sem acesso: nunca em silêncio.
+  if (checkout && CLOSED.has(checkout.status)) {
+    alert('paid-closed-checkout');
+    return 'pago atrasado de checkout já ' + checkout.status;
+  }
+  if (CLOSED.has(billing.status) && billing.checkoutId === ev.checkoutId) {
+    alert('paid-closed-checkout');
+    return 'pago atrasado: billing já ' + billing.status;
+  }
 
   if (billing.status === 'paid' && billing.checkoutId !== ev.checkoutId) {
     if (refs.checkout && checkout) tx.update(refs.checkout, { status: 'paid' });
@@ -61,8 +68,9 @@ function applyPaid(tx, refs, ev, { billing, checkout }, alert) {
 }
 
 function applyClosed(tx, refs, ev, { billing, checkout }) {
-  if (refs.checkout && checkout && !CLOSED.has(checkout.status)) tx.update(refs.checkout, { status: ev.kind });
+  // Só o checkout pago e atual fecha; outro (ainda aberto) pode ser pago depois.
   if (billing.status !== 'paid' || billing.checkoutId !== ev.checkoutId) return 'não é o checkout pago atual';
+  if (refs.checkout && checkout && !CLOSED.has(checkout.status)) tx.update(refs.checkout, { status: ev.kind });
   tx.update(refs.billing, { status: ev.kind, updatedAt: FieldValue.serverTimestamp() });
   tx.update(refs.user, { access: 'blocked' });
   return 'bloqueado';

@@ -27,7 +27,7 @@ const PENDING_RECLAIM_MS = 24 * HOUR_MS;
 const REUSE_MARGIN_MS = 5 * 60000;
 // Limite de tentativas de cadastro por IP.
 const RATE_MAX = 20; // por IP/hora (CGNAT de operadoras brasileiras)
-const RATE_GLOBAL_MAX = 300; // válvula global: inscrições/hora no total
+const SPIKE_MAX = 300; // só alerta (nunca bloqueia): cadastros concluídos por hora
 const RATE_WINDOW_MS = HOUR_MS;
 
 const exists = () => new HttpsError('already-exists', MSG_EXISTS);
@@ -76,32 +76,52 @@ function clientIp(request) {
   return raw.ip ? String(raw.ip) : 'desconhecido';
 }
 
-// Janela fixa de 1 h: um contador por IP (hash, para não guardar o IP em claro) e um
-// contador global (válvula de segurança, caso o IP do cliente seja lido errado).
+// Janela fixa de 1 h por IP (hash, para não guardar o IP em claro). Único limite que bloqueia.
 async function rateLimit(db, request) {
   const hash = crypto.createHash('sha256').update(clientIp(request)).digest('hex');
-  const refs = [
-    { ref: db.doc('rateLimits/signup_' + hash), max: RATE_MAX },
-    { ref: db.doc('rateLimits/signup_global'), max: RATE_GLOBAL_MAX },
-  ];
+  const ref = db.doc('rateLimits/signup_' + hash);
   await db.runTransaction(async (tx) => {
-    const snaps = await Promise.all(refs.map((r) => tx.get(r.ref)));
+    const snap = await tx.get(ref);
     const now = Date.now();
-    const writes = [];
-    snaps.forEach((snap, i) => {
-      const { ref, max } = refs[i];
+    const start = snap.exists && snap.get('windowStart') ? snap.get('windowStart').toMillis() : 0;
+    if (!snap.exists || now - start >= RATE_WINDOW_MS) {
+      tx.set(ref, {
+        windowStart: Timestamp.fromMillis(now), count: 1, expiresAt: Timestamp.fromMillis(now + RATE_WINDOW_MS),
+      });
+      return;
+    }
+    if ((snap.get('count') || 0) >= RATE_MAX) throw new HttpsError('resource-exhausted', MSG_RATE);
+    tx.update(ref, { count: FieldValue.increment(1) });
+  });
+}
+
+// Conta cadastros CONCLUÍDOS na hora; passou de SPIKE_MAX, grava um alerta (uma vez por
+// janela) e um warn. Nunca recusa nada nem derruba o cadastro.
+async function noteSignupSuccess(db) {
+  try {
+    const ref = db.doc('rateLimits/signup_success');
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const now = Date.now();
       const start = snap.exists && snap.get('windowStart') ? snap.get('windowStart').toMillis() : 0;
       if (!snap.exists || now - start >= RATE_WINDOW_MS) {
-        writes.push(() => tx.set(ref, {
-          windowStart: Timestamp.fromMillis(now), count: 1, expiresAt: Timestamp.fromMillis(now + RATE_WINDOW_MS),
-        }));
+        tx.set(ref, {
+          windowStart: Timestamp.fromMillis(now), count: 1, alerted: false, expiresAt: Timestamp.fromMillis(now + RATE_WINDOW_MS),
+        });
         return;
       }
-      if ((snap.get('count') || 0) >= max) throw new HttpsError('resource-exhausted', MSG_RATE);
-      writes.push(() => tx.update(ref, { count: FieldValue.increment(1) }));
+      const count = (snap.get('count') || 0) + 1;
+      const upd = { count };
+      if (count > SPIKE_MAX && !snap.get('alerted')) {
+        upd.alerted = true;
+        tx.create(db.collection('alerts').doc(), { type: 'signup-spike', count, at: FieldValue.serverTimestamp(), resolved: false });
+        logger.warn('signup: pico de cadastros na última hora', { count });
+      }
+      tx.update(ref, upd);
     });
-    writes.forEach((w) => w());
-  });
+  } catch (err) {
+    logger.warn('signup: não contou o cadastro concluído', { err: safeErr(err) });
+  }
 }
 
 async function authUserExists(uid) {
@@ -364,7 +384,9 @@ async function signup(request) {
   await finishReclaim(db, cpf, uid, reservation);
 
   try {
-    return { checkoutUrl: await openCheckout(db, uid) };
+    const checkoutUrl = await openCheckout(db, uid);
+    await noteSignupSuccess(db);
+    return { checkoutUrl };
   } catch (err) {
     if (err instanceof HttpsError) throw err;
     // A conta e o CPF ficam com este uid; o aluno entra e usa resumeCheckout.
