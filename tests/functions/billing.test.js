@@ -124,7 +124,7 @@ function payment(fixture, checkoutId, { id, paymentId, n, event } = {}) {
 }
 
 async function wipe() {
-  for (const c of ['users', 'cpfs', 'checkouts', 'asaasEvents', 'config', 'rateLimits', 'testFaults', 'alerts']) {
+  for (const c of ['users', 'cpfs', 'checkouts', 'asaasEvents', 'config', 'rateLimits', 'testFaults', 'alerts', 'payments']) {
     await db.recursiveDelete(db.collection(c));
   }
   await fetch(`${AUTH}/emulator/v1/projects/${PROJECT}/accounts`, { method: 'DELETE' });
@@ -786,6 +786,62 @@ describe('cadastro, retomada e webhook', () => {
     await signupOk(person({ cpf: old.p.cpf }));
     await hook(payment('pixReceived', old.checkoutId));
     assert.equal((await alerts()).filter((a) => a.type === 'cpf-conflict').length, 1);
+  });
+
+  describe('payments (financeiro)', () => {
+    const pay = (id) => get('payments/' + id);
+
+    it('payments: cartão 12x soma o netValue das 12 parcelas e repetição não soma duas vezes', async () => {
+      const { uid, checkoutId } = await signupOk();
+      const all = Array.from({ length: 12 }, (_, i) =>
+        payment('cardConfirmed', checkoutId, { id: `evt_pp_${i + 1}`, paymentId: `pay_pp_${i + 1}`, n: i + 1 }));
+      await hook(checkoutPaid(uid, checkoutId));
+      let p = await pay(checkoutId);
+      assert.equal(p.status, 'paid');
+      assert.equal(p.gross, 159);
+      assert.equal(p.net, null);
+      for (const e of all) await hook(e);
+      // mesma cobrança com outro id de evento (reenvio): não soma de novo
+      await hook(payment('cardConfirmed', checkoutId, { id: 'evt_pp_dup', paymentId: 'pay_pp_3', n: 3 }));
+      p = await pay(checkoutId);
+      assert.equal(p.uid, uid);
+      assert.equal(p.method, 'CREDIT_CARD');
+      assert.equal(p.installments, 12);
+      assert.equal(p.net, 152.28);
+      assert.equal(Object.keys(p.parts).length, 12);
+      assert.equal(p.product, 'Do 0 aos 5 km');
+      assert.ok(p.paidAt && p.updatedAt);
+    });
+
+    it('payments: Pix', async () => {
+      const { checkoutId } = await signupOk();
+      await hook(payment('pixReceived', checkoutId));
+      const p = await pay(checkoutId);
+      assert.deepEqual([p.status, p.method, p.installments, p.gross, p.net], ['paid', 'PIX', null, 159, 157.01]);
+    });
+
+    it('payments: reembolso e chargeback mudam a situação e mantêm o líquido', async () => {
+      const a = await signupOk();
+      await hook(payment('cardConfirmed', a.checkoutId));
+      await hook(payment('cardRefunded', a.checkoutId));
+      const r = await pay(a.checkoutId);
+      assert.equal(r.status, 'refunded');
+      assert.equal(r.net, 12.69);
+      const b = await signupOk();
+      await hook(payment('cardConfirmed', b.checkoutId));
+      await hook(payment('cardChargeback', b.checkoutId));
+      assert.equal((await pay(b.checkoutId)).status, 'chargeback');
+    });
+
+    it('payments: recusado depois de pago; recusado de checkout sem pagamento não cria linha', async () => {
+      const a = await signupOk();
+      await hook(payment('cardConfirmed', a.checkoutId));
+      await hook(payment('cardConfirmed', a.checkoutId, { id: 'evt_rej_a', paymentId: 'pay_rej_a', event: 'PAYMENT_REPROVED_BY_RISK_ANALYSIS' }));
+      assert.equal((await pay(a.checkoutId)).status, 'rejected');
+      const b = await signupOk();
+      await hook(payment('cardConfirmed', b.checkoutId, { event: 'PAYMENT_REPROVED_BY_RISK_ANALYSIS' }));
+      assert.equal(await pay(b.checkoutId), undefined);
+    });
   });
 
   it('webhook: evento ignorado responde 200', async () => {

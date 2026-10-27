@@ -123,6 +123,8 @@ describe('classifyEvent', () => {
       method: null,
       installments: null,
       installmentId: null,
+      value: null,
+      netValue: null,
     });
   });
 
@@ -135,6 +137,8 @@ describe('classifyEvent', () => {
       method: 'PIX',
       installments: null,
       installmentId: null,
+      value: 159,
+      netValue: 157.01,
     });
   });
 
@@ -147,6 +151,8 @@ describe('classifyEvent', () => {
       method: 'CREDIT_CARD',
       installments: 12,
       installmentId: '1e7dbfdd-d86d-46dc-82a8-ba347835a5c6',
+      value: 13.25,
+      netValue: 12.69,
     });
   });
 

@@ -30,4 +30,4 @@ function checkoutArgs(uid) {
   };
 }
 
-module.exports = { ASAAS_API_KEY, ASAAS_WEBHOOK_TOKEN, asaasClient, checkoutArgs };
+module.exports = { ASAAS_API_KEY, ASAAS_WEBHOOK_TOKEN, PROGRAM_PRICE, asaasClient, checkoutArgs };

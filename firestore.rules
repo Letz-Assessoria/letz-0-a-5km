@@ -96,6 +96,12 @@ service cloud.firestore {
     match /cpfs/{cpf} { allow read, write: if false; }
     match /asaasEvents/{eventId} { allow read, write: if false; }
 
+    // ---------- payments (financeiro: uma linha por compra; só as Functions escrevem) ----------
+    match /payments/{checkoutId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     // ---------- alerts (pagamento sem ativação; escritos pelo webhook) ----------
     match /alerts/{id} {
       allow read: if isAdmin();

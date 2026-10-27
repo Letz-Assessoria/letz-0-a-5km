@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const logger = require('firebase-functions/logger');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { classifyEvent } = require('./asaas.js');
-const { ASAAS_WEBHOOK_TOKEN } = require('./billing-config.js');
+const { ASAAS_WEBHOOK_TOKEN, PROGRAM_PRICE } = require('./billing-config.js');
 const { safeErr } = require('./safe.js');
 
 const CLOSED = new Set(['refunded', 'chargeback', 'rejected']);
@@ -79,6 +79,45 @@ function applyClosed(tx, refs, ev, { billing, checkout }) {
   return 'bloqueado';
 }
 
+const round2 = (n) => Math.round(n * 100) / 100;
+const PRODUCT = 'Do 0 aos 5 km';
+
+// payments/{checkoutId}: uma linha por compra, só para o painel financeiro (Functions
+// escrevem, treinador lê). net = soma do netValue de cada cobrança DISTINTA vista
+// (parts), então evento repetido ou parcela reenviada não soma duas vezes.
+function writePayment(tx, ref, ev, existing, { billing, checkout, uid }) {
+  const now = FieldValue.serverTimestamp();
+  const current = billing.status === 'paid' && billing.checkoutId === ev.checkoutId;
+  let status = existing && existing.status;
+  if (ev.kind === 'paid') {
+    if (!status) status = checkout && CLOSED.has(checkout.status) ? checkout.status : 'paid';
+  } else if (ev.kind === 'rejected') {
+    // Só o pagamento que ativou a conta (ou já registrado como pago) muda de situação.
+    if (!(status === 'paid' || (!status && current))) return;
+    status = 'rejected';
+  } else {
+    if (!status && !current) return;
+    status = ev.kind;
+  }
+  const parts = { ...(existing && existing.parts) };
+  if (validId(ev.paymentId) && ev.netValue !== null) {
+    parts[ev.paymentId] = { value: ev.value, netValue: ev.netValue };
+  }
+  const nets = Object.values(parts).map((p) => p.netValue).filter((n) => typeof n === 'number');
+  const doc = {
+    uid, checkoutId: ev.checkoutId, status,
+    method: ev.method || (existing && existing.method) || billing.method || null,
+    installments: ev.installments || (existing && existing.installments) || billing.installments || null,
+    gross: existing && typeof existing.gross === 'number' ? existing.gross : Number(PROGRAM_PRICE.value()),
+    net: nets.length ? round2(nets.reduce((a, b) => a + b, 0)) : null,
+    parts,
+    product: PRODUCT,
+    paidAt: existing && existing.paidAt ? existing.paidAt : (ev.kind === 'paid' || current ? now : null),
+    updatedAt: now,
+  };
+  tx.set(ref, doc);
+}
+
 async function processEvent(db, body) {
   if (typeof body.id !== 'string' || !EVENT_ID_RE.test(body.id)) return { result: 'ignorado', warn: 'id de evento inválido' };
   const eventId = body.id;
@@ -111,8 +150,11 @@ async function processEvent(db, body) {
       user: db.doc('users/' + uid),
       billing: db.doc(`users/${uid}/private/billing`),
       checkout: checkout ? coRef : null,
+      payment: ev.checkoutId ? db.doc('payments/' + ev.checkoutId) : null,
     } : null;
-    const [userSnap, billingSnap] = refs ? await Promise.all([tx.get(refs.user), tx.get(refs.billing)]) : [];
+    const [userSnap, billingSnap, paySnap] = refs
+      ? await Promise.all([tx.get(refs.user), tx.get(refs.billing), refs.payment ? tx.get(refs.payment) : null])
+      : [];
 
     tx.create(eventRef, {
       type: typeof body.event === 'string' ? body.event : null,
@@ -137,6 +179,7 @@ async function processEvent(db, body) {
 
     const state = { billing: billingSnap.data(), checkout };
     const result = ev.kind === 'paid' ? applyPaid(tx, refs, ev, state, alert) : applyClosed(tx, refs, ev, state);
+    if (refs.payment) writePayment(tx, refs.payment, ev, paySnap && paySnap.exists ? paySnap.data() : null, { ...state, uid });
     return { result, uid, mismatch };
   });
 }

@@ -117,7 +117,11 @@ const REJECT_EVENTS = new Set(['PAYMENT_REPROVED_BY_RISK_ANALYSIS', 'PAYMENT_CRE
 const METHODS = new Set(['PIX', 'CREDIT_CARD']);
 
 function ignore() {
-  return { kind: 'ignore', uid: null, checkoutId: null, paymentId: null, method: null, installments: null, installmentId: null };
+  return { kind: 'ignore', uid: null, checkoutId: null, paymentId: null, method: null, installments: null, installmentId: null, value: null, netValue: null };
+}
+
+function num(v) {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
 function str(v) {
@@ -164,6 +168,8 @@ function classifyEvent(body) {
     method,
     installments: installmentsOf(p, method),
     installmentId: str(p.installment),
+    value: num(p.value),
+    netValue: num(p.netValue),
   };
 }
 

@@ -184,6 +184,16 @@ describe('firestore.rules', () => {
     await assertSucceeds(updateDoc(ref, { photoURL: 'https://firebasestorage.googleapis.com/v0/b/demo-letz.appspot.com/o/a.jpg' }));
   });
 
+  it('payments: aluno não lê; admin lê; ninguém escreve', async () => {
+    await seed((f) => setDoc(doc(f, 'payments', 'c1'), { uid: ALICE, status: 'paid', gross: 159 }));
+    await assertFails(getDoc(doc(db(ALICE), 'payments', 'c1')));
+    await assertSucceeds(getDoc(doc(adminDb(), 'payments', 'c1')));
+    await assertFails(setDoc(doc(adminDb(), 'payments', 'c2'), { status: 'paid' }));
+    await assertFails(updateDoc(doc(adminDb(), 'payments', 'c1'), { status: 'refunded' }));
+    await assertFails(deleteDoc(doc(adminDb(), 'payments', 'c1')));
+    await assertFails(setDoc(doc(db(ALICE), 'payments', 'c3'), { uid: ALICE, status: 'paid' }));
+  });
+
   it('alerts: aluno não lê nem escreve; admin lê e só marca resolved', async () => {
     await seed((f) => setDoc(doc(f, 'alerts', 'a1'), { type: 'unknown-uid', uid: null, checkoutId: null, eventId: 'e', resolved: false }));
     await assertFails(getDoc(doc(db(ALICE), 'alerts', 'a1')));
