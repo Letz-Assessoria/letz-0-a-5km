@@ -122,7 +122,7 @@ test('link direto #/app/feed sem login vai para #/entrar', async ({ page }) => {
 test('treinador entra e vê o painel', async ({ page }) => {
   const c = await makeCoach();
   await login(page, c.email, c.password);
-  await expect(page).toHaveURL(/#\/admin\/turma$/);
+  await expect(page).toHaveURL(/#\/admin\/financeiro$/);
   await expect(page.getByRole('heading', { name: 'Painel' })).toBeVisible();
 
   // Sair encerra a sessão e protege o painel de novo.
