@@ -1,5 +1,19 @@
 # Notas do Asaas (sandbox, 27/10/2026)
 
+## Decisão (dono, 27/10/2026)
+
+- **Asaas Checkout** (`POST /checkouts`), só por API, sem configuração manual no painel.
+- **Pix ou cartão em até 12x sem juros** para o aluno: 12x de **R$ 13,25** (R$ 159,00). A Letz absorve a taxa. No 12x recebe **R$ 152,28**, no cartão 1x R$ 153,76 e no Pix **R$ 157,01**.
+- Sem preencher cliente (`customer`/`customerData` exigiriam endereço): o aluno informa identificação e endereço na página do Asaas. O uid vai em `externalReference` do checkout.
+- Implementação: `functions/src/asaas.js` (`createClient` → `createCheckout`, `cancelCheckout`; `classifyEvent`), imagem do item em `functions/assets/item.png`, servidor falso em `tests/fake-asaas.mjs`, corpos reais em `tests/functions/fixtures/asaas-events.json`.
+- `classifyEvent`:
+  - `CHECKOUT_PAID` → `paid`, com o uid tirado de `checkout.externalReference`.
+  - `PAYMENT_CONFIRMED` e `PAYMENT_RECEIVED` → `paid`. `PAYMENT_REFUNDED` → `refunded`. `PAYMENT_CHARGEBACK_REQUESTED` e `PAYMENT_CHARGEBACK_DISPUTE` → `chargeback`. Nesses eventos `uid` vem `null` e o `checkoutId` sai de `payment.checkoutSession`.
+  - Parcelas: usa `installmentCount` se vier (não vem nos webhooks). Senão, o "de M" da descrição "Parcela N de M.". Cartão sem `payment.installment` conta 1. Pix fica `null`.
+  - Também devolve `installmentId` (`payment.installment`), para agrupar os 12 eventos de uma compra parcelada.
+  - O resto → `ignore`.
+- Conferido ao vivo no sandbox: `createCheckout` com o PNG do item foi aceito (200), e `cancelCheckout` cancelou (200). Cancelar um id inexistente dá 404.
+
 Investigação do passo 1 da task 5. Tudo foi testado no **sandbox** (`https://api-sandbox.asaas.com/v3`), com a chave lida de variável de ambiente. Nenhuma chave aparece aqui.
 
 ## Resultado do portão: BLOQUEADO
