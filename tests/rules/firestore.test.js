@@ -15,6 +15,7 @@ const core = createRequire(import.meta.url)('../../public/lib/core.js');
 
 const { WEEK_MS } = core;
 const DAY = 864e5;
+const FS_URL = 'https://firebasestorage.googleapis.com/v0/b/demo-letz.appspot.com/o/avatars%2Falice.jpg?alt=media';
 
 setLogLevel('silent');
 
@@ -84,7 +85,7 @@ describe('firestore.rules', () => {
 
   it('users: aluno não altera access, points nem done', async () => {
     const ref = doc(db(ALICE), 'users', ALICE);
-    await assertSucceeds(updateDoc(ref, { name: 'Alice B', photoURL: 'x', profiled: true, welcomed: true }));
+    await assertSucceeds(updateDoc(ref, { name: 'Alice B', photoURL: FS_URL, profiled: true, welcomed: true }));
     await assertFails(updateDoc(ref, { access: 'blocked' }));
     await assertFails(updateDoc(ref, { points: 999 }));
     await assertFails(updateDoc(ref, { done: 30 }));
@@ -152,21 +153,51 @@ describe('firestore.rules', () => {
     await assertSucceeds(b.commit());
   });
 
+  it('users: trocar handle libera o antigo na mesma batch', async () => {
+    await seed((f) => setDoc(doc(f, 'handles', 'alice'), { uid: ALICE }));
+    const f = db(ALICE);
+    const b = writeBatch(f);
+    b.set(doc(f, 'handles', 'alice.run'), { uid: ALICE });
+    b.update(doc(f, 'users', ALICE), { handle: 'alice.run' });
+    b.delete(doc(f, 'handles', 'alice'));
+    await assertSucceeds(b.commit());
+  });
+
+  it('handles: não apaga handle ainda em uso', async () => {
+    await seed((f) => setDoc(doc(f, 'handles', 'alice'), { uid: ALICE }));
+    await assertFails(deleteDoc(doc(db(ALICE), 'handles', 'alice')));
+  });
+
+  it('users: rejeita name longo, handle inválido e photoURL externa', async () => {
+    const ref = doc(db(ALICE), 'users', ALICE);
+    await assertFails(updateDoc(ref, { name: 'x'.repeat(81) }));
+    await assertFails(updateDoc(ref, { name: 42 }));
+    await assertFails(updateDoc(ref, { photoURL: 'https://evil.example/pixel.gif' }));
+    await assertFails(updateDoc(ref, { photoURL: 'javascript:alert(1)' }));
+    await assertFails(updateDoc(ref, { profiled: 'sim' }));
+    for (const h of ['Alice', 'al', 'a'.repeat(31), 'ali ce', 'ali<b>']) {
+      await seed((f) => setDoc(doc(f, 'handles', h), { uid: ALICE }));
+      await assertFails(updateDoc(ref, { handle: h }));
+    }
+    await assertSucceeds(updateDoc(ref, { name: 'x'.repeat(80), photoURL: '' }));
+    await assertSucceeds(updateDoc(ref, { photoURL: 'http://127.0.0.1:9199/v0/b/demo-letz.appspot.com/o/a.jpg' }));
+  });
+
   it('handles: não apaga handle de outro', async () => {
-    await seed((f) => setDoc(doc(f, 'handles', 'bob'), { uid: BOB }));
-    await assertFails(deleteDoc(doc(db(ALICE), 'handles', 'bob')));
-    await assertFails(deleteDoc(doc(adminDb(), 'handles', 'bob')));
-    await assertSucceeds(deleteDoc(doc(db(BOB), 'handles', 'bob')));
+    await seed((f) => setDoc(doc(f, 'handles', 'bobvelho'), { uid: BOB }));
+    await assertFails(deleteDoc(doc(db(ALICE), 'handles', 'bobvelho')));
+    await assertFails(deleteDoc(doc(adminDb(), 'handles', 'bobvelho')));
+    await assertSucceeds(deleteDoc(doc(db(BOB), 'handles', 'bobvelho')));
   });
 
   it('handles: cria só com uid próprio e só se não existir', async () => {
-    await assertSucceeds(setDoc(doc(db(ALICE), 'handles', 'alice'), { uid: ALICE }));
+    await assertSucceeds(setDoc(doc(db(ALICE), 'handles', 'alice2'), { uid: ALICE }));
     await assertFails(setDoc(doc(db(BOB), 'handles', 'bobby'), { uid: ALICE }));
-    await assertFails(setDoc(doc(db(BOB), 'handles', 'alice'), { uid: BOB })); // já existe
+    await assertFails(setDoc(doc(db(BOB), 'handles', 'alice2'), { uid: BOB })); // já existe
     await assertFails(setDoc(doc(db(BOB), 'handles', 'bobx'), { uid: BOB, email: 'x' })); // só uid
-    await assertSucceeds(getDoc(doc(db(PETE), 'handles', 'alice'))); // checar disponibilidade
-    await assertFails(deleteDoc(doc(db(BOB), 'handles', 'alice')));
-    await assertSucceeds(deleteDoc(doc(db(ALICE), 'handles', 'alice')));
+    await assertSucceeds(getDoc(doc(db(PETE), 'handles', 'alice2'))); // checar disponibilidade
+    await assertFails(deleteDoc(doc(db(BOB), 'handles', 'alice2')));
+    await assertSucceeds(deleteDoc(doc(db(ALICE), 'handles', 'alice2')));
   });
 
   it('cpfs: cliente não lê nem escreve', async () => {
@@ -180,6 +211,32 @@ describe('firestore.rules', () => {
     await assertSucceeds(setDoc(doc(db(ALICE), 'posts', `${ALICE}_1-0`), newPost(ALICE, 1, 0)));
     const { rc, ...semRc } = newPost(ALICE, 1, 1);
     await assertSucceeds(setDoc(doc(db(ALICE), 'posts', `${ALICE}_1-1`), semRc));
+  });
+
+  it('posts: rejeita comment longo ou não string', async () => {
+    const a = db(ALICE);
+    await assertFails(setDoc(doc(a, 'posts', `${ALICE}_1-0`), newPost(ALICE, 1, 0, { comment: 'x'.repeat(1001) })));
+    await assertFails(setDoc(doc(a, 'posts', `${ALICE}_1-0`), newPost(ALICE, 1, 0, { comment: 7 })));
+    const id = await seedPost(ALICE, 1, 1);
+    await assertFails(updateDoc(doc(a, 'posts', id), { comment: 'x'.repeat(1001) }));
+    await assertSucceeds(updateDoc(doc(a, 'posts', id), { comment: 'x'.repeat(1000) }));
+  });
+
+  it('posts: rejeita photoPath de outro caminho', async () => {
+    const a = db(ALICE);
+    await assertFails(setDoc(doc(a, 'posts', `${ALICE}_1-0`), newPost(ALICE, 1, 0, { photoPath: `workouts/${BOB}/1-0.jpg` })));
+    await assertFails(setDoc(doc(a, 'posts', `${ALICE}_1-0`), newPost(ALICE, 1, 0, { photoPath: `workouts/${ALICE}/1-1.jpg` })));
+    await assertSucceeds(setDoc(doc(a, 'posts', `${ALICE}_1-0`), newPost(ALICE, 1, 0, { photoPath: `workouts/${ALICE}/1-0.jpg` })));
+    await assertFails(updateDoc(doc(a, 'posts', `${ALICE}_1-0`), { photoPath: `avatars/${ALICE}.jpg` }));
+    await assertSucceeds(updateDoc(doc(a, 'posts', `${ALICE}_1-0`), { photoPath: '' }));
+  });
+
+  it('posts: rejeita imgURL externa', async () => {
+    const a = db(ALICE);
+    await assertFails(setDoc(doc(a, 'posts', `${ALICE}_1-0`), newPost(ALICE, 1, 0, { imgURL: 'https://evil.example/x.jpg' })));
+    await assertSucceeds(setDoc(doc(a, 'posts', `${ALICE}_1-0`), newPost(ALICE, 1, 0, { imgURL: FS_URL })));
+    await assertFails(updateDoc(doc(a, 'posts', `${ALICE}_1-0`), { imgURL: 'http://evil.example/x.jpg' }));
+    await assertFails(updateDoc(doc(a, 'posts', `${ALICE}_1-0`), { imgURL: 'https://firebasestorage.googleapis.com.evil.example/v0/b/x' }));
   });
 
   it('posts: rejeita at diferente de request.time', async () => {
@@ -226,7 +283,7 @@ describe('firestore.rules', () => {
   it('posts: aluno edita só comment/photoPath/imgURL do próprio; não muda hidden, rc, authorActive', async () => {
     const id = await seedPost(ALICE, 1, 0);
     const ref = doc(db(ALICE), 'posts', id);
-    await assertSucceeds(updateDoc(ref, { comment: 'Bom treino', photoPath: `workouts/${ALICE}/1-0.jpg`, imgURL: 'https://x' }));
+    await assertSucceeds(updateDoc(ref, { comment: 'Bom treino', photoPath: `workouts/${ALICE}/1-0.jpg`, imgURL: FS_URL }));
     await assertFails(updateDoc(ref, { hidden: true }));
     await assertFails(updateDoc(ref, { rc: { fire: 10 } }));
     await assertFails(updateDoc(ref, { authorActive: false }));
@@ -263,6 +320,15 @@ describe('firestore.rules', () => {
     const c = { uid: BOB, handle: ALICE, text: 'Boa!', at: serverTimestamp(), hidden: false };
     await assertFails(setDoc(doc(db(BOB), `posts/${id}/comments/c1`), c));
     await assertSucceeds(setDoc(doc(db(BOB), `posts/${id}/comments/c1`), { ...c, handle: BOB }));
+  });
+
+  it('comments: rejeita text vazio, longo ou não string', async () => {
+    const id = await seedPost(ALICE, 1, 0);
+    const c = { uid: BOB, handle: BOB, text: 'Boa!', at: serverTimestamp(), hidden: false };
+    for (const text of ['', 'x'.repeat(1001), 123]) {
+      await assertFails(setDoc(doc(db(BOB), `posts/${id}/comments/c1`), { ...c, text }));
+    }
+    await assertSucceeds(setDoc(doc(db(BOB), `posts/${id}/comments/c1`), { ...c, text: 'x'.repeat(1000) }));
   });
 
   it('reactions: só escreve o doc com o próprio uid', async () => {

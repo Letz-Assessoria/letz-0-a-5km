@@ -57,6 +57,12 @@ describe('storage.rules', () => {
     await assertFails(uploadBytes(ref(st('alice'), 'workouts/alice/1-0.jpg'), bytes(10 * KB), { contentType: 'application/pdf' }));
   });
 
+  it('storage: rejeita image/svg+xml', async () => {
+    await assertFails(uploadBytes(ref(st('alice'), 'avatars/alice.jpg'), bytes(KB), { contentType: 'image/svg+xml' }));
+    await assertFails(uploadBytes(ref(st('alice'), 'workouts/alice/1-0.jpg'), bytes(KB), { contentType: 'image/svg+xml' }));
+    await assertFails(uploadBytes(ref(st('alice'), 'avatars/alice.jpg'), bytes(KB), { contentType: 'image/png' }));
+  });
+
   it('storage: rejeita caminho de outro uid', async () => {
     await assertFails(uploadBytes(ref(st('alice'), 'avatars/bob.jpg'), bytes(10 * KB), jpeg));
     await assertFails(uploadBytes(ref(st('alice'), 'workouts/bob/1-1.jpg'), bytes(10 * KB), jpeg));

@@ -15,6 +15,14 @@ service cloud.firestore {
     function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
     function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
     function myProfile() { return get(me()).data; }
+    // URL de imagem: vazia ou do Firebase Storage. O host do emulador do Storage
+    // (127.0.0.1/localhost:9199, caminho /v0/b/) é aceito para testes locais: só
+    // aponta para a máquina de quem vê, sem rastreio externo.
+    function imgUrlOk(v) {
+      return v is string && v.size() <= 2048 && (v == ''
+        || v.matches('^https://firebasestorage[.]googleapis[.]com/v0/b/.*')
+        || v.matches('^http://(127[.]0[.]0[.]1|localhost):9199/v0/b/.*'));
+    }
     // Se o handle foi criado ou trocado, a reserva handles/{novo} do próprio uid
     // tem que existir ao fim da mesma transação/batch.
     function handleReserved() {
@@ -25,12 +33,22 @@ service cloud.firestore {
 
     // ---------- users ----------
     match /users/{uid} {
+      function profileFieldsOk(d) {
+        // Só valida o que mudou (curto-circuito: campo ausente e intocado não dá erro).
+        let c = changed();
+        return (!('name' in c) || (d.name is string && d.name.size() <= 80))
+          && (!('handle' in c) || (d.handle is string && d.handle.matches('^[a-z0-9._]{3,30}$')))
+          && (!('photoURL' in c) || imgUrlOk(d.photoURL))
+          && (!('profiled' in c) || d.profiled is bool)
+          && (!('welcomed' in c) || d.welcomed is bool);
+      }
       allow read: if isOwner(uid) || isActive() || isAdmin();
       // users/{uid} é criado pelas Functions.
       allow create, delete: if false;
       allow update: if
         (isOwner(uid)
           && changed().hasOnly(['name', 'handle', 'photoURL', 'profiled', 'welcomed'])
+          && profileFieldsOk(request.resource.data)
           && handleReserved())
         || (isAdmin()
           && changed().hasOnly(['access', 'points', 'done'])
@@ -69,7 +87,10 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['uid'])
         && request.resource.data.uid == request.auth.uid;
       allow update: if false;
-      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+      // Só o dono apaga, e só se o handle não estiver mais em users/{uid}.handle
+      // ao fim da batch (senão outro aluno poderia pegar o mesmo @).
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid
+        && getAfter(me()).data.get('handle', null) != handle;
     }
 
     // ---------- só Functions ----------
@@ -89,6 +110,13 @@ service cloud.firestore {
     }
 
     match /posts/{postId} {
+      // comment, photoPath e imgURL: tipos e formatos. uid/w/d vêm do próprio post.
+      function contentOk(p, uid, w, d) {
+        return (!('comment' in p) || (p.comment is string && p.comment.size() <= 1000))
+          && (!('photoPath' in p) || p.photoPath == ''
+              || p.photoPath == 'workouts/' + uid + '/' + string(w) + '-' + string(d) + '.jpg')
+          && (!('imgURL' in p) || imgUrlOk(p.imgURL));
+      }
       function newPostOk() {
         let p = request.resource.data;
         let u = myProfile();
@@ -104,6 +132,7 @@ service cloud.firestore {
           && p.hidden == false
           && p.authorActive == true
           && (!('rc' in p) || p.rc == {})
+          && contentOk(p, p.uid, p.w, p.d)
           && weekOpen(p.w);
       }
 
@@ -111,7 +140,8 @@ service cloud.firestore {
       allow create: if isActive() && newPostOk();
       allow update: if
         (isActive() && resource.data.uid == request.auth.uid
-          && changed().hasOnly(['comment', 'photoPath', 'imgURL']))
+          && changed().hasOnly(['comment', 'photoPath', 'imgURL'])
+          && contentOk(request.resource.data, resource.data.uid, resource.data.w, resource.data.d))
         || (isAdmin() && changed().hasOnly(['hidden']) && request.resource.data.hidden is bool);
       allow delete: if signedIn() && resource.data.uid == request.auth.uid;
 

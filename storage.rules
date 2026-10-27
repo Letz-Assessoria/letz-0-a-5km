@@ -2,7 +2,7 @@ rules_version = '2';
 
 // Regras do Storage do "Do 0 aos 5 km".
 // Caminhos: avatars/{uid}.jpg e workouts/{uid}/{w}-{d}.jpg.
-// Dono escreve (imagem, < 2 MB); lê quem está ativo (consulta o Firestore) ou o treinador.
+// Dono escreve (só image/jpeg, < 2 MB); lê quem está ativo (consulta o Firestore) ou o treinador.
 service firebase.storage {
   match /b/{bucket}/o {
 
@@ -15,7 +15,7 @@ service firebase.storage {
     function canRead() { return isActive() || isAdmin(); }
     function imageOk() {
       return request.resource.size < 2 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
+        && request.resource.contentType == 'image/jpeg';
     }
 
     match /avatars/{file} {
