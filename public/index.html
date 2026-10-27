@@ -3028,7 +3028,7 @@ function vProfile(){var D=V.draft,first=!S.profiled;
  '<div class="stack" style="gap:8px"><span class="label">Assim você aparece no feed</span><div class="preview"><div class="post">'+(D.photo?'<div class="av me"><img src="'+D.photo+'" alt=""></div>':'<div class="av me" aria-hidden="true" id="pv-ini">'+esc(initials(D.name||D.handle||'?'))+'</div>')+'<div><div><span class="who" id="pv-handle">@'+esc(D.handle||'seu.instagram')+'</span> <span class="muted">· agora</span></div><div class="what">'+ic('run')+'<span>Fez o treino de terça da semana 1</span></div></div></div></div></div>'+
  '<button class="btn go wide" data-act="profile-save">'+(first?'Salvar e continuar':'Salvar')+' '+ic('arrow')+'</button>'+'<button class="linkbtn" data-act="to-privacy">Como usamos seus dados</button>'+
  (first?'':'<button class="btn line wide" data-act="profile-cancel">Cancelar</button>');}
-function openProfile(){V.draft={name:S.name,handle:S.handle,photo:S.photo};V.perr='';V.view='profile';}
+function openProfile(){V.draft={name:S.name||(V.sdoc&&V.sdoc.name)||'',handle:S.handle,photo:S.photo};V.perr='';V.view='profile';}
 function grab(){var n=document.getElementById('in-pname'),h=document.getElementById('in-handle');if(n)V.draft.name=n.value;if(h)V.draft.handle=h.value;}
 function cleanHandle(v){return LetzCore.cleanHandle(v);}
 function loadPhoto(file){if(!file||!/^image\//.test(file.type)){V.perr='Escolha um arquivo de imagem.';render();return;}
@@ -3382,7 +3382,7 @@ app.addEventListener('click',function(e){var b=e.target.closest('[data-act]');if
 render();
 /* sessão: o papel sai de LetzFB.onSession (Firebase Auth + users/{uid} ao vivo) */
 function fbReady(cb){if(window.LetzFB)cb();else document.addEventListener('letzfb-ready',cb,{once:true});}
-fbReady(function(){LetzFB.onSession(function(s){var r=roleOf(s),first=!sessionKnown;sessionKnown=true;if(!first&&r===role)return;role=r;if(V.signingUp)return;reroute();});});
+fbReady(function(){LetzFB.onSession(function(s){V.sdoc=s&&s.doc||null;var r=roleOf(s),first=!sessionKnown;sessionKnown=true;if(!first&&r===role)return;role=r;if(V.signingUp)return;reroute();});});
 })();
 </script>
 </body></html>
