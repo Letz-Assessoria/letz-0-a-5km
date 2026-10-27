@@ -179,7 +179,12 @@ async function processEvent(db, body) {
 
     const state = { billing: billingSnap.data(), checkout };
     const result = ev.kind === 'paid' ? applyPaid(tx, refs, ev, state, alert) : applyClosed(tx, refs, ev, state);
-    if (refs.payment) writePayment(tx, refs.payment, ev, paySnap && paySnap.exists ? paySnap.data() : null, { ...state, uid });
+    if (refs.payment) {
+      // Linha financeira é só relatório: falha aqui nunca pode desfazer a liberação de acesso.
+      // writePayment só escreve (tx.set) no fim, então um throw antes disso não deixa efeito parcial.
+      try { writePayment(tx, refs.payment, ev, paySnap && paySnap.exists ? paySnap.data() : null, { ...state, uid }); }
+      catch (e) { console.error('payments: falha ao montar a linha financeira', e && e.message); }
+    }
     return { result, uid, mismatch };
   });
 }
