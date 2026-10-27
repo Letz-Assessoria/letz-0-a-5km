@@ -90,3 +90,21 @@ test('set-admin: --remove revoga tokens', async () => {
   assert.ok(tvat(after) > tvat(before));
   assert.match(out, /1h/);
 });
+
+test('set-admin: conta desativada é recusada sem --enable', async () => {
+  const email = `off-${Date.now()}@example.test`;
+  const user = await auth.createUser({ email, password: 'senha-teste-123', emailVerified: true, disabled: true });
+  assert.throws(() => run(['--project', PROJECT, '--email', email]), (e) => e.status === 1);
+  const after = await auth.getUser(user.uid);
+  assert.equal(after.customClaims?.admin, undefined);
+  assert.equal(after.disabled, true);
+});
+
+test('set-admin: --enable reativa e concede', async () => {
+  const email = `on-${Date.now()}@example.test`;
+  const user = await auth.createUser({ email, password: 'senha-teste-123', emailVerified: true, disabled: true });
+  run(['--project', PROJECT, '--email', email, '--enable']);
+  const after = await auth.getUser(user.uid);
+  assert.equal(after.disabled, false);
+  assert.equal(after.customClaims?.admin, true);
+});

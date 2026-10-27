@@ -14,6 +14,7 @@ const { values } = parseArgs({
     project: { type: 'string' },
     email: { type: 'string' },
     remove: { type: 'boolean', default: false },
+    enable: { type: 'boolean', default: false },
   },
 });
 
@@ -43,12 +44,19 @@ try {
     console.log(`Link de redefinição de senha (envie ao treinador): ${link}`);
   }
 
+  if (!created && !values.remove && user.disabled) {
+    if (!values.enable) {
+      throw new Error('conta desativada; nada foi alterado. Use --enable para reativar e conceder admin');
+    }
+    await auth.updateUser(user.uid, { disabled: false });
+    console.log(`Conta reativada (--enable): uid=${user.uid}`);
+  }
+
   if (!created && !values.remove && user.emailVerified !== true) {
     // Anti pre-hijacking: conta existente com e-mail não verificado pode ter sido
     // criada por terceiros. Retoma a conta antes de conceder admin.
     await auth.updateUser(user.uid, {
       password: randomBytes(24).toString('base64url'),
-      disabled: false,
     });
     await auth.revokeRefreshTokens(user.uid);
     const link = await auth.generatePasswordResetLink(values.email);
