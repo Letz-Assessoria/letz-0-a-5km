@@ -1,0 +1,38 @@
+rules_version = '2';
+
+// Regras do Storage do "Do 0 aos 5 km".
+// Caminhos: avatars/{uid}.jpg e workouts/{uid}/{w}-{d}.jpg.
+// Dono escreve (imagem, < 2 MB); lê quem está ativo (consulta o Firestore) ou o treinador.
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() { return request.auth != null; }
+    function isAdmin() { return signedIn() && request.auth.token.get('admin', false) == true; }
+    function isActive() {
+      return signedIn()
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.access == 'active';
+    }
+    function canRead() { return isActive() || isAdmin(); }
+    function imageOk() {
+      return request.resource.size < 2 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /avatars/{file} {
+      function mine() { return signedIn() && file == request.auth.uid + '.jpg'; }
+      allow read: if canRead();
+      allow create, update: if mine() && imageOk();
+      allow delete: if mine();
+    }
+
+    match /workouts/{uid}/{file} {
+      function mine() {
+        return signedIn() && uid == request.auth.uid
+          && file.matches('^([1-9]|10)-[0-2][.]jpg$');
+      }
+      allow read: if canRead();
+      allow create, update: if mine() && imageOk();
+      allow delete: if mine();
+    }
+  }
+}
