@@ -31,8 +31,8 @@ const db = admin.firestore();
 let fake;
 let seq = 0;
 
-async function call(name, data, idToken) {
-  const headers = { 'content-type': 'application/json' };
+async function call(name, data, idToken, extraHeaders = {}) {
+  const headers = { 'content-type': 'application/json', ...extraHeaders };
   if (idToken) headers.authorization = 'Bearer ' + idToken;
   const res = await fetch(`${FN}/${name}`, { method: 'POST', headers, body: JSON.stringify({ data }) });
   const body = await res.json();
@@ -269,6 +269,20 @@ describe('cadastro, retomada e webhook', () => {
     await assert.rejects(admin.auth().getUserByEmail(p.email));
   });
 
+  it('signup: x-forwarded-for forjado não burla o limite', async () => {
+    // Só o último salto (o que o front-end do Google acrescenta) conta.
+    const xff = (i) => ({ 'x-forwarded-for': `10.0.0.${i}, 203.0.113.${i}, 198.51.100.7` });
+    for (let i = 0; i < 5; i++) {
+      const r = await call('signup', person(), null, xff(i));
+      assert.equal(r.error, undefined, JSON.stringify(r.error));
+    }
+    const r = await call('signup', person(), null, xff(99));
+    assert.equal(r.error.status, 'RESOURCE_EXHAUSTED');
+    // Outro IP real (último salto diferente) não é afetado.
+    const other = await call('signup', person(), null, { 'x-forwarded-for': '10.0.0.1, 198.51.100.8' });
+    assert.equal(other.error, undefined, JSON.stringify(other.error));
+  });
+
   it('signup: CPF inválido → invalid-argument', async () => {
     const r = await call('signup', person({ cpf: '123.456.789-00' }));
     assert.equal(r.error.status, 'INVALID_ARGUMENT');
@@ -490,6 +504,21 @@ describe('cadastro, retomada e webhook', () => {
     assert.equal((await get('users/' + a.uid)).access, 'active');
     assert.equal((await get('users/' + b.uid)).access, 'pending');
     assert.equal((await get('asaasEvents/' + (await db.collection('asaasEvents').get()).docs[0].id)).uid, a.uid);
+  });
+
+  it('webhook: pagamento de conta com CPF liberado marca cpfConflict', async () => {
+    const old = await signupOk();
+    await db.doc('users/' + old.uid).update({
+      createdAt: admin.firestore.Timestamp.fromMillis(Date.now() - 25 * 3600e3),
+    });
+    await signupOk(person({ cpf: old.p.cpf }));
+    assert.equal((await get(`users/${old.uid}/private/billing`)).cpfReleased, true);
+    // O checkout antigo não cancelou a tempo e a pessoa pagou: ativa, mas sinaliza.
+    assert.equal((await hook(payment('pixReceived', old.checkoutId))).status, 200);
+    assert.equal((await get('users/' + old.uid)).access, 'active');
+    const billing = await get(`users/${old.uid}/private/billing`);
+    assert.equal(billing.status, 'paid');
+    assert.equal(billing.cpfConflict, true);
   });
 
   it('webhook: pagamento de segundo checkout marca duplicate', async () => {

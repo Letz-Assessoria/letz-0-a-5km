@@ -32,6 +32,8 @@ function applyPaid(tx, refs, ev, { billing, checkout }) {
     Object.assign(update, { status: 'paid', checkoutId: ev.checkoutId, paidAt: now });
     tx.update(refs.user, { access: 'active' });
   }
+  // CPF já foi para outro cadastro, mas a pessoa pagou: ativa e sinaliza para o treinador.
+  if (billing.cpfReleased === true && !billing.cpfConflict) update.cpfConflict = true;
   if (ev.method && billing.method !== ev.method) update.method = ev.method;
   if (ev.installments && billing.installments !== ev.installments) update.installments = ev.installments;
   if (ev.paymentId && !billing.paymentId) update.paymentId = ev.paymentId;
@@ -39,6 +41,7 @@ function applyPaid(tx, refs, ev, { billing, checkout }) {
   if (!Object.keys(update).length) return 'sem mudança';
   update.updatedAt = now;
   tx.update(refs.billing, update);
+  if (update.cpfConflict) return 'cpfConflict';
   return billing.status === 'paid' ? 'detalhes do pagamento' : 'ativado';
 }
 
@@ -121,6 +124,8 @@ async function asaasWebhook(req, res) {
       logger.error('asaasWebhook: ' + out.error, {
         eventId: body.id, event: body.event, uid: out.uid || null, checkoutId: out.ev.checkoutId, paymentId: out.ev.paymentId,
       });
+    } else if (out.result === 'cpfConflict') {
+      logger.error('asaasWebhook: conta paga com CPF já liberado para outro cadastro (cpfConflict)', { eventId: body.id, uid: out.uid });
     } else if (out.result === 'duplicate') {
       logger.error('asaasWebhook: segundo checkout pago para conta já paga', { eventId: body.id, uid: out.uid });
     } else {

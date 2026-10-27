@@ -53,12 +53,18 @@ async function fault(db, name, flag) {
   return snap.exists && snap.get(flag) === true;
 }
 
+// IP do cliente: o último salto do x-forwarded-for, que é o acrescentado pelo
+// front-end do Google (os anteriores vêm do cliente e podem ser forjados).
+// Sem o cabeçalho, rawRequest.ip.
 function clientIp(request) {
   const raw = request.rawRequest || {};
-  if (raw.ip) return String(raw.ip);
-  const xff = raw.headers && raw.headers['x-forwarded-for'];
-  const first = typeof xff === 'string' ? xff.split(',')[0].trim() : '';
-  return first || 'desconhecido';
+  const header = raw.headers && raw.headers['x-forwarded-for'];
+  const xff = Array.isArray(header) ? header.join(',') : header;
+  if (typeof xff === 'string') {
+    const hops = xff.split(',').map((h) => h.trim()).filter(Boolean);
+    if (hops.length) return hops[hops.length - 1];
+  }
+  return raw.ip ? String(raw.ip) : 'desconhecido';
 }
 
 // Janela fixa de 1 h por IP (hash, para não guardar o IP em claro).
