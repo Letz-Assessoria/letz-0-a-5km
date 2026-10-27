@@ -2795,7 +2795,7 @@ function ic(n){return '<svg class="i" viewBox="0 0 24 24" aria-hidden="true">'+I
 
 function lastSunday18(){var d=new Date();d.setHours(18,0,0,0);d.setDate(d.getDate()-d.getDay());if(d>new Date())d.setDate(d.getDate()-7);return d.getTime();}
 var START_TURMA=Date.parse(LetzCore.DEFAULT_START_ISO);
-function newS(){return {uid:'',start:START_TURMA,name:'',handle:'',photo:'',profiled:false,welcomed:false,wphotos:{},myr:{},cm:{},ship:null,track:'',videos:null,cfg:{av:'',wa:'558781908719',grupo:'https://chat.whatsapp.com/DhIw9GK5wdB9xuijBUm0RV',frete:35},marks:{},comments:{},removed:{},texts:{},mine:[],feed:[],feedLoaded:false,feedMore:false,rank:[],rankLoaded:false,mineLoaded:false};}
+function newS(){return {points:0,uid:'',start:START_TURMA,name:'',handle:'',photo:'',profiled:false,welcomed:false,wphotos:{},myr:{},cm:{},ship:null,track:'',videos:null,cfg:{av:'',wa:'558781908719',grupo:'https://chat.whatsapp.com/DhIw9GK5wdB9xuijBUm0RV',frete:35},marks:{},comments:{},removed:{},texts:{},mine:[],feed:[],feedLoaded:false,feedMore:false,rank:[],rankLoaded:false,mineLoaded:false};}
 var S=newS();
 /* S é só um cache: os listeners do LetzFB (Firestore) preenchem; nada vai para o localStorage */
 function save(){return true;}
@@ -2829,7 +2829,7 @@ function postSocial(p,adm){var id=p.id,cl=cList(id),h='<div class="react">';
 function posts(){return S.feed.filter(function(p){return !p.hidden;}).map(function(p){return {id:p.id,uid:p.uid,who:p.handle?'@'+p.handle:(p.name||'Aluno'),me:p.uid===S.uid,w:p.w,d:p.d,t:p.at,c:p.comment||'',ph:p.imgURL||'',photoURL:p.photoURL||'',rc:p.rc||{}};});}
 function weekIdx(t){return LetzCore.weekIndex(S.start,t);}
 function pointedSet(){var o={};LetzCore.pointedKeys(S.marks,S.start).forEach(function(k){o[k]=1;});return o;}
-function myPoints(){return LetzCore.pointsFor(S.marks,S.start).points;}
+function myPoints(){return S.points||0;}
 function pointedThisWeek(){var w=weekIdx(Date.now()),c=0;for(var k in S.marks)if(weekIdx(S.marks[k])===w)c++;return Math.min(c,3);}
 function totalDone(){return Object.keys(S.marks).length;}
 function projectEnded(){return Date.now()>=S.start+10*WEEK;}
@@ -3392,7 +3392,7 @@ function syncFeedSubs(){var ids={},need=[];S.feed.forEach(function(p){ids[p.id]=
  for(var id in cmSubs)if(!ids[id]){cmSubs[id]();delete cmSubs[id];delete S.cm[id];}
  S.feed.forEach(function(p){if(!cmSubs[p.id])cmSubs[p.id]=LetzFB.watchComments(p.id,function(l){S.cm[p.id]=l;softRender();});
   if(role==='athlete'&&!S.myr[p.id]&&!rxLoading[p.id]){rxLoading[p.id]=1;need.push(p.id);}});
- if(need.length)LetzFB.loadMyReactions(need).then(function(m){for(var id in m)S.myr[id]=m[id];softRender();}).catch(function(){});}
+ if(need.length)LetzFB.loadMyReactions(need).then(function(m){need.forEach(function(id){if(m[id])S.myr[id]=m[id];else delete rxLoading[id];});softRender();}).catch(function(){need.forEach(function(id){delete rxLoading[id];});});}
 function startData(){var adm=role==='admin';
  stops.push(LetzFB.watchConfig(applyCfg));
  stops.push(LetzFB.watchFeed(function(l,m){S.feed=l;S.feedLoaded=true;S.feedMore=!!(m&&m.more);syncFeedSubs();softRender();}));
@@ -3405,7 +3405,7 @@ setTimeout(function(){if(!window.LetzFB){V.fbfail=true;render();}},10000);
 fbReady(function(){LetzFB.onSession(function(s){V.sdoc=s&&s.doc||null;var r=roleOf(s),first=!sessionKnown,uid=s&&s.user?s.user.uid:'',want=(r==='athlete'||r==='admin')?r:'';
  sessionKnown=true;role=r;
  var fresh=(uid!==S.uid||want!==dataRole);if(fresh){resetData();S.uid=uid;dataRole=want;}
- if(s&&s.doc){S.name=s.doc.name||'';S.handle=s.doc.handle||'';S.photo=s.doc.photoURL||'';S.profiled=!!s.doc.profiled;S.welcomed=!!s.doc.welcomed;}
+ if(s&&s.doc){S.name=s.doc.name||'';S.handle=s.doc.handle||'';S.photo=s.doc.photoURL||'';S.profiled=!!s.doc.profiled;S.welcomed=!!s.doc.welcomed;S.points=Number(s.doc.points)||0;}
  if(fresh&&want)startData();
  if(!first&&!fresh&&r===prevRole){softRender();return;}
  prevRole=r;if(V.signingUp)return;reroute();});});
