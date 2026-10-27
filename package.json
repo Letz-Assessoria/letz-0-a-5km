@@ -5,7 +5,7 @@
   "scripts": {
     "test:unit": "node --test \"tests/unit/*.test.js\"",
     "test:rules": "firebase emulators:exec --only firestore,storage --project demo-letz \"node --test --test-concurrency=1 \\\"tests/rules/*.test.js\\\"\"",
-    "test:functions": "mkdir -p functions/shared && cp public/lib/core.js functions/shared/core.js && echo 'test:functions: preenchido em task posterior'",
+    "test:functions": "mkdir -p functions/shared && cp public/lib/core.js functions/shared/core.js && firebase emulators:exec --only firestore,functions --project demo-letz \"node --test --test-concurrency=1 \\\"tests/functions/*.test.js\\\"\"",
     "test:e2e": "echo 'test:e2e: preenchido em task posterior' && exit 0",
     "emulators": "firebase emulators:start"
   },
