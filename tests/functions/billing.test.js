@@ -91,6 +91,16 @@ async function signupOk(p = person()) {
 
 const get = async (path) => (await db.doc(path).get()).data();
 
+async function waitFor(fn, ms = 5000) {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = await fn();
+    if (v) return v;
+    if (Date.now() > end) throw new Error('waitFor: tempo esgotado');
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
 function checkoutPaid(uid, checkoutId, id = 'evt_checkout_' + Math.random()) {
   const e = structuredClone(events.checkoutPaidPix);
   e.id = id;
@@ -275,6 +285,86 @@ describe('cadastro, retomada e webhook', () => {
     assert.equal((await get('checkouts/' + old.checkoutId)).status, 'active');
     const sent = await (await fetch(`${fake.url}/__checkouts`)).json();
     assert.equal(sent.find((c) => c.id === old.checkoutId).status, 'ACTIVE');
+    const token = await signIn(old.p.email, old.p.password);
+    assert.equal((await call('resumeCheckout', {}, token)).result.checkoutUrl, old.url);
+  });
+
+  it('signup: entre as fases a conta antiga não consegue retomar o pagamento', async () => {
+    const old = await signupOk();
+    await db.doc('users/' + old.uid).update({
+      createdAt: admin.firestore.Timestamp.fromMillis(Date.now() - 25 * 3600e3),
+    });
+    // Checkout antigo vencido: sem o bloqueio, resumeCheckout abriria outro.
+    await db.doc(`users/${old.uid}/private/billing`).update({
+      expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() - 60000),
+    });
+    const token = await signIn(old.p.email, old.p.password);
+    // Segura a função logo depois da fase 1 (só no emulador).
+    await db.doc('testFaults/signup').set({ pauseAfterReserveMs: 6000 });
+    const p = person({ cpf: old.p.cpf });
+    const pending = call('signup', p);
+    const pendingBy = await waitFor(async () => (await get(`users/${old.uid}/private/billing`)).cpfReclaimPendingBy);
+    assert.equal((await get('cpfs/' + old.p.cpf)).reclaimedFrom, old.uid);
+    assert.equal((await get(`users/${old.uid}/private/billing`)).cpfReleased, undefined);
+
+    const r = await call('resumeCheckout', {}, token);
+    assert.equal(r.error && r.error.status, 'FAILED_PRECONDITION');
+    assert.equal(r.error.message, 'Este cadastro foi encerrado. Fale com a Letz.');
+    const sent = await (await fetch(`${fake.url}/__checkouts`)).json();
+    assert.equal(sent.length, 1);
+
+    const done = await pending;
+    assert.equal(done.error, undefined, JSON.stringify(done.error));
+    const fresh = await admin.auth().getUserByEmail(p.email);
+    assert.equal(pendingBy, fresh.uid);
+    const billing = await get(`users/${old.uid}/private/billing`);
+    assert.equal(billing.cpfReleased, true);
+    assert.equal(billing.cpfReclaimPendingBy, undefined);
+  });
+
+  it('signup: falha no finishReclaim deixa marcador e bloqueia retomada', async () => {
+    const old = await signupOk();
+    await db.doc('users/' + old.uid).update({
+      createdAt: admin.firestore.Timestamp.fromMillis(Date.now() - 25 * 3600e3),
+    });
+    await db.doc('testFaults/signup').set({ failFinishReclaim: true });
+    const fresh = await signupOk(person({ cpf: old.p.cpf }));
+    assert.equal((await get('cpfs/' + old.p.cpf)).uid, fresh.uid);
+    const billing = await get(`users/${old.uid}/private/billing`);
+    assert.equal(billing.cpfReclaimPendingBy, fresh.uid);
+    assert.equal(billing.cpfReleased, undefined);
+
+    const token = await signIn(old.p.email, old.p.password);
+    const r = await call('resumeCheckout', {}, token);
+    assert.equal(r.error && r.error.status, 'FAILED_PRECONDITION');
+    assert.equal(r.error.message, 'Este cadastro foi encerrado. Fale com a Letz.');
+
+    // Se mesmo assim o checkout antigo for pago: ativa e marca cpfConflict.
+    assert.equal((await hook(payment('pixReceived', old.checkoutId))).status, 200);
+    assert.equal((await get('users/' + old.uid)).access, 'active');
+    const paid = await get(`users/${old.uid}/private/billing`);
+    assert.equal(paid.status, 'paid');
+    assert.equal(paid.cpfConflict, true);
+  });
+
+  it('signup: rollback limpa cpfReclaimPendingBy', async () => {
+    const old = await signupOk();
+    await db.doc('users/' + old.uid).update({
+      createdAt: admin.firestore.Timestamp.fromMillis(Date.now() - 25 * 3600e3),
+    });
+    await db.doc('testFaults/signup').set({ pauseAfterReserveMs: 4000, failBatch: true });
+    const p = person({ cpf: old.p.cpf });
+    const pending = call('signup', p);
+    // O marcador existe entre as fases...
+    await waitFor(async () => (await get(`users/${old.uid}/private/billing`)).cpfReclaimPendingBy);
+    const r = await pending;
+    assert.equal(r.error.status, 'INTERNAL');
+    // ...e some quando a tentativa é desfeita.
+    assert.equal((await get('cpfs/' + old.p.cpf)).uid, old.uid);
+    const billing = await get(`users/${old.uid}/private/billing`);
+    assert.equal(billing.cpfReclaimPendingBy, undefined);
+    assert.equal(billing.cpfReleased, undefined);
+    await db.doc('testFaults/signup').delete();
     const token = await signIn(old.p.email, old.p.password);
     assert.equal((await call('resumeCheckout', {}, token)).result.checkoutUrl, old.url);
   });

@@ -14,6 +14,7 @@ const MSG_UNAVAILABLE = 'Não conseguimos abrir o pagamento agora. Entre com seu
 const MSG_SALES_CLOSED = 'As vendas desta turma estão fechadas.';
 const MSG_RATE = 'Muitas tentativas. Tente de novo em alguns minutos.';
 const MSG_PAID = 'O pagamento já foi feito.';
+const MSG_CLOSED = 'Este cadastro foi encerrado. Fale com a Letz.';
 
 const HOUR_MS = 3600e3;
 // Reserva órfã (função caiu entre reservar o CPF e gravar a conta): retomável
@@ -47,11 +48,19 @@ function validate(data) {
 }
 
 // Falhas injetáveis só no emulador (testes): testFaults/{name}.
-async function fault(db, name, flag) {
-  if (process.env.FUNCTIONS_EMULATOR !== 'true') return false;
+async function faultValue(db, name, field) {
+  if (process.env.FUNCTIONS_EMULATOR !== 'true') return undefined;
   const snap = await db.doc('testFaults/' + name).get();
-  return snap.exists && snap.get(flag) === true;
+  return snap.exists ? snap.get(field) : undefined;
 }
+async function fault(db, name, flag) {
+  return (await faultValue(db, name, flag)) === true;
+}
+
+const cpfHash = (cpf) => crypto.createHash('sha256').update(String(cpf)).digest('hex');
+
+// Conta que perdeu o CPF (ou está perdendo) não paga nem abre checkout.
+const cpfGone = (billing) => !!(billing && (billing.cpfReleased || billing.cpfReclaimPendingBy));
 
 // IP do cliente: o último salto do x-forwarded-for, que é o acrescentado pelo
 // front-end do Google (os anteriores vêm do cliente e podem ser forjados).
@@ -129,8 +138,9 @@ async function cancelCheckoutQuietly(db, checkoutId, why) {
 }
 
 // Reserva cpfs/{cpf} para uid. Falha com already-exists se o CPF tem dono que não pode perdê-lo.
-// Retomada em duas fases: aqui só aponta o CPF para o novo uid (com reclaimedFrom);
-// os efeitos na conta antiga (cpfReleased, cancelar o checkout) ficam para
+// Retomada em duas fases: aqui aponta o CPF para o novo uid (com reclaimedFrom) e,
+// na mesma transação, marca o billing antigo com cpfReclaimPendingBy (a conta antiga
+// já não retoma o pagamento). cpfReleased e o cancelamento do checkout ficam para
 // finishReclaim, depois que a conta nova foi gravada. Devolve {prev, prevAt, kind}
 // (prev só quando a transação de fato tomou o CPF de outro uid).
 async function reserveCpf(db, cpf, uid) {
@@ -147,52 +157,79 @@ async function reserveCpf(db, cpf, uid) {
     const snap = await tx.get(ref);
     const holder = snap.exists ? snap.get('uid') : null;
     if (holder && holder !== uid && holder !== prev) throw exists();
+    let prevBillingRef = null;
     if (holder && holder === prev && kind === 'pending') {
-      const billing = await tx.get(db.doc(`users/${prev}/private/billing`));
+      prevBillingRef = db.doc(`users/${prev}/private/billing`);
+      const billing = await tx.get(prevBillingRef);
       if (!billing.exists || billing.get('status') !== 'pending') throw exists();
     }
     const data = { uid, at: FieldValue.serverTimestamp() };
     if (holder && holder === prev) data.reclaimedFrom = prev;
     tx.set(ref, data);
+    if (prevBillingRef) {
+      tx.update(prevBillingRef, { cpfReclaimPendingBy: uid, updatedAt: FieldValue.serverTimestamp() });
+    }
     return holder && holder === prev ? { prevAt: snap.get('at') || null } : null;
   });
   return took ? { prev, prevAt: took.prevAt, kind } : { prev: null, prevAt: null, kind: null };
 }
 
-// Segunda fase da retomada: só depois que a conta nova existe.
+// Segunda fase da retomada: só depois que a conta nova existe. Troca o marcador
+// cpfReclaimPendingBy por cpfReleased numa transação (com uma nova tentativa).
+// Se falhar de vez, o marcador fica: a conta antiga continua sem retomar o pagamento.
 async function finishReclaim(db, cpf, uid, { prev, kind }) {
   if (!prev) return;
   logger.info('signup: CPF retomado de outra conta', { from: prev, to: uid, kind });
   if (kind !== 'pending') return;
   const billingRef = db.doc(`users/${prev}/private/billing`);
   let checkoutId = null;
-  try {
-    checkoutId = await db.runTransaction(async (tx) => {
-      const billing = await tx.get(billingRef);
-      if (!billing.exists) return null;
-      const update = { cpfReleased: true, updatedAt: FieldValue.serverTimestamp() };
-      if (billing.get('status') !== 'pending') {
-        update.cpfConflict = true;
-        logger.error('signup: conta antiga pagou durante a retomada do CPF (cpfConflict)', { from: prev, to: uid });
-      }
-      tx.update(billingRef, update);
-      return billing.get('status') === 'pending' ? billing.get('checkoutId') || null : null;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      if (await fault(db, 'signup', 'failFinishReclaim')) throw new Error('falha simulada no finishReclaim');
+      checkoutId = await db.runTransaction(async (tx) => {
+        const billing = await tx.get(billingRef);
+        if (!billing.exists) return null;
+        const update = {
+          cpfReleased: true, cpfReclaimPendingBy: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(),
+        };
+        if (billing.get('status') !== 'pending' && !billing.get('cpfConflict')) {
+          update.cpfConflict = true;
+          logger.error('signup: conta antiga pagou durante a retomada do CPF (cpfConflict)', { from: prev, to: uid });
+        }
+        tx.update(billingRef, update);
+        return billing.get('status') === 'pending' ? billing.get('checkoutId') || null : null;
+      });
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  if (lastErr) {
+    logger.error('signup: não marcou cpfReleased na conta antiga; cpfReclaimPendingBy fica', {
+      from: prev, to: uid, cpfSha256: cpfHash(cpf), err: String(lastErr),
     });
-  } catch (err) {
-    logger.error('signup: não marcou cpfReleased na conta antiga', { from: prev, to: uid, err: String(err) });
+    return;
   }
   await cancelCheckoutQuietly(db, checkoutId, 'signup');
 }
 
 // Desfaz a reserva: devolve o CPF ao dono anterior (retomada) ou apaga.
-// Só mexe se cpfs/{cpf} ainda aponta para este uid.
+// Só mexe se cpfs/{cpf} ainda aponta para este uid. Na devolução, limpa o
+// cpfReclaimPendingBy que esta tentativa deixou no billing antigo.
 async function releaseCpf(db, cpf, uid, prev = null, prevAt = null) {
   const ref = db.doc('cpfs/' + cpf);
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists || snap.get('uid') !== uid) return;
+    const prevBillingRef = prev ? db.doc(`users/${prev}/private/billing`) : null;
+    const prevBilling = prevBillingRef ? await tx.get(prevBillingRef) : null;
     if (prev) tx.set(ref, { uid: prev, at: prevAt || FieldValue.serverTimestamp() });
     else tx.delete(ref);
+    if (prevBilling && prevBilling.exists && prevBilling.get('cpfReclaimPendingBy') === uid) {
+      tx.update(prevBillingRef, { cpfReclaimPendingBy: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() });
+    }
   }).catch((err) => logger.error('signup: não liberou o CPF reservado', { uid, prev, err: String(err) }));
 }
 
@@ -225,7 +262,8 @@ async function openCheckout(db, uid) {
   const billingRef = db.doc(`users/${uid}/private/billing`);
   const saved = await db.runTransaction(async (tx) => {
     const billing = await tx.get(billingRef);
-    const ok = billing.exists && billing.get('status') === 'pending' && !billing.get('cpfReleased');
+    const gone = billing.exists && cpfGone(billing.data());
+    const ok = billing.exists && billing.get('status') === 'pending' && !gone;
     tx.set(db.doc('checkouts/' + checkout.id), {
       uid, createdAt: FieldValue.serverTimestamp(), expiresAt, status: ok ? 'active' : 'canceled',
     });
@@ -234,15 +272,15 @@ async function openCheckout(db, uid) {
         checkoutId: checkout.id, url: checkout.url, expiresAt, updatedAt: FieldValue.serverTimestamp(),
       });
     }
-    return ok;
+    return ok ? 'ok' : (gone ? 'closed' : 'paid');
   });
-  if (!saved) {
+  if (saved !== 'ok') {
     try {
       await asaasClient().cancelCheckout(checkout.id);
     } catch (err) {
       logger.error('openCheckout: não cancelou o checkout aberto em corrida com o pagamento', { uid, checkoutId: checkout.id, err: String(err) });
     }
-    throw new HttpsError('failed-precondition', MSG_PAID);
+    throw new HttpsError('failed-precondition', saved === 'closed' ? MSG_CLOSED : MSG_PAID);
   }
   return checkout.url;
 }
@@ -272,6 +310,9 @@ async function signup(request) {
   const uid = db.collection('users').doc().id;
   const reservation = await reserveCpf(db, cpf, uid);
   const undoCpf = () => releaseCpf(db, cpf, uid, reservation.prev, reservation.prevAt);
+  // Só nos testes: segura a função entre a fase 1 da retomada e o resto.
+  const pauseMs = await faultValue(db, 'signup', 'pauseAfterReserveMs');
+  if (typeof pauseMs === 'number' && pauseMs > 0) await new Promise((r) => setTimeout(r, Math.min(pauseMs, 15000)));
 
   try {
     await getAuth().createUser({ uid, email, password, displayName: name });
@@ -333,9 +374,7 @@ async function resumeCheckout(request) {
   ]);
   const billing = billingSnap.exists ? billingSnap.data() : null;
   if (billing && billing.status === 'paid') throw new HttpsError('failed-precondition', MSG_PAID);
-  if (billing && billing.cpfReleased) {
-    throw new HttpsError('failed-precondition', 'Este cadastro foi encerrado. Fale com a Letz.');
-  }
+  if (cpfGone(billing)) throw new HttpsError('failed-precondition', MSG_CLOSED);
   if (!user.exists || user.get('access') !== 'pending' || !billing || billing.status !== 'pending') {
     throw new HttpsError('failed-precondition', 'Esta conta não tem pagamento pendente.');
   }
