@@ -80,7 +80,7 @@ O treinador é identificado pela custom claim `admin: true`. O treinador não te
   - `public/lib/core.js`;
   - `tests/unit/core.test.js`.
 - Modificar:
-  - `firebase.json`: acrescentar `firestore`, `storage`, `functions` (`source: functions`, `predeploy` copia `public/lib/core.js` para `functions/shared/core.js`), `emulators` (auth 9099, firestore 8080, storage 9199, functions 5001, hosting 5000, ui ligado);
+  - `firebase.json`: acrescentar `firestore`, `storage`, `functions` (`source: functions`, `predeploy` copia `public/lib/core.js` para `functions/shared/core.js`), `emulators` (auth 9099, firestore 8080, storage 9199, functions 5001, hosting 5050, ui ligado);
   - `.firebaserc`: aliases `prod` e `dev`;
   - `.gitignore`: acrescentar `node_modules/`, `functions/shared/`, `*.log`, `test-results/`;
   - `public/index.html`: carregar `/lib/core.js` antes do script principal e trocar as funções duplicadas pelas de `core.js`.
@@ -297,7 +297,7 @@ O treinador é identificado pela custom claim `admin: true`. O treinador não te
 **Arquivos:**
 - Criar:
   - `public/js/fb.js` (módulo ES);
-  - `playwright.config.mjs`, que sobe os emuladores e o `fake-asaas`, com baseURL `http://localhost:5000`;
+  - `playwright.config.mjs`, que sobe os emuladores e o `fake-asaas`, com baseURL `http://localhost:5050`;
   - `tests/e2e/auth.spec.mjs`.
 - Modificar: `public/index.html`.
 
