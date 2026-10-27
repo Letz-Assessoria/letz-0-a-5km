@@ -129,6 +129,10 @@ async function cancelCheckoutQuietly(db, checkoutId, why) {
 }
 
 // Reserva cpfs/{cpf} para uid. Falha com already-exists se o CPF tem dono que não pode perdê-lo.
+// Retomada em duas fases: aqui só aponta o CPF para o novo uid (com reclaimedFrom);
+// os efeitos na conta antiga (cpfReleased, cancelar o checkout) ficam para
+// finishReclaim, depois que a conta nova foi gravada. Devolve {prev, prevAt, kind}
+// (prev só quando a transação de fato tomou o CPF de outro uid).
 async function reserveCpf(db, cpf, uid) {
   const ref = db.doc('cpfs/' + cpf);
   const existing = await ref.get();
@@ -139,31 +143,57 @@ async function reserveCpf(db, cpf, uid) {
     kind = await reclaimKind(db, prev, existing);
     if (!kind) throw exists();
   }
-  const released = await db.runTransaction(async (tx) => {
+  const took = await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     const holder = snap.exists ? snap.get('uid') : null;
     if (holder && holder !== uid && holder !== prev) throw exists();
-    let checkoutId = null;
     if (holder && holder === prev && kind === 'pending') {
-      const billingRef = db.doc(`users/${prev}/private/billing`);
-      const billing = await tx.get(billingRef);
+      const billing = await tx.get(db.doc(`users/${prev}/private/billing`));
       if (!billing.exists || billing.get('status') !== 'pending') throw exists();
-      checkoutId = billing.get('checkoutId') || null;
-      tx.update(billingRef, { cpfReleased: true, updatedAt: FieldValue.serverTimestamp() });
     }
-    tx.set(ref, { uid, at: FieldValue.serverTimestamp() });
-    return { checkoutId };
+    const data = { uid, at: FieldValue.serverTimestamp() };
+    if (holder && holder === prev) data.reclaimedFrom = prev;
+    tx.set(ref, data);
+    return holder && holder === prev ? { prevAt: snap.get('at') || null } : null;
   });
-  if (kind) logger.info('signup: CPF retomado de outra conta', { from: prev, to: uid, kind });
-  if (kind === 'pending') await cancelCheckoutQuietly(db, released.checkoutId, 'signup');
+  return took ? { prev, prevAt: took.prevAt, kind } : { prev: null, prevAt: null, kind: null };
 }
 
-async function releaseCpf(db, cpf, uid) {
+// Segunda fase da retomada: só depois que a conta nova existe.
+async function finishReclaim(db, cpf, uid, { prev, kind }) {
+  if (!prev) return;
+  logger.info('signup: CPF retomado de outra conta', { from: prev, to: uid, kind });
+  if (kind !== 'pending') return;
+  const billingRef = db.doc(`users/${prev}/private/billing`);
+  let checkoutId = null;
+  try {
+    checkoutId = await db.runTransaction(async (tx) => {
+      const billing = await tx.get(billingRef);
+      if (!billing.exists) return null;
+      const update = { cpfReleased: true, updatedAt: FieldValue.serverTimestamp() };
+      if (billing.get('status') !== 'pending') {
+        update.cpfConflict = true;
+        logger.error('signup: conta antiga pagou durante a retomada do CPF (cpfConflict)', { from: prev, to: uid });
+      }
+      tx.update(billingRef, update);
+      return billing.get('status') === 'pending' ? billing.get('checkoutId') || null : null;
+    });
+  } catch (err) {
+    logger.error('signup: não marcou cpfReleased na conta antiga', { from: prev, to: uid, err: String(err) });
+  }
+  await cancelCheckoutQuietly(db, checkoutId, 'signup');
+}
+
+// Desfaz a reserva: devolve o CPF ao dono anterior (retomada) ou apaga.
+// Só mexe se cpfs/{cpf} ainda aponta para este uid.
+async function releaseCpf(db, cpf, uid, prev = null, prevAt = null) {
   const ref = db.doc('cpfs/' + cpf);
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
-    if (snap.exists && snap.get('uid') === uid) tx.delete(ref);
-  }).catch((err) => logger.error('signup: não liberou o CPF reservado', { uid, err: String(err) }));
+    if (!snap.exists || snap.get('uid') !== uid) return;
+    if (prev) tx.set(ref, { uid: prev, at: prevAt || FieldValue.serverTimestamp() });
+    else tx.delete(ref);
+  }).catch((err) => logger.error('signup: não liberou o CPF reservado', { uid, prev, err: String(err) }));
 }
 
 async function deleteAuthUser(uid) {
@@ -227,24 +257,37 @@ async function signup(request) {
     throw new HttpsError('failed-precondition', MSG_SALES_CLOSED);
   }
 
+  // E-mail já cadastrado: falha antes de tocar em qualquer CPF.
+  try {
+    await getAuth().getUserByEmail(email);
+    throw exists();
+  } catch (err) {
+    if (err instanceof HttpsError) throw err;
+    if (!err || err.code !== 'auth/user-not-found') {
+      logger.error('signup: getUserByEmail falhou', { err: String(err) });
+      throw new HttpsError('internal', 'Não foi possível criar a conta. Tente de novo.');
+    }
+  }
+
   const uid = db.collection('users').doc().id;
-  await reserveCpf(db, cpf, uid);
+  const reservation = await reserveCpf(db, cpf, uid);
+  const undoCpf = () => releaseCpf(db, cpf, uid, reservation.prev, reservation.prevAt);
 
   try {
     await getAuth().createUser({ uid, email, password, displayName: name });
   } catch (err) {
     const code = (err && err.code) || '';
     if (code === 'auth/email-already-exists') {
-      await releaseCpf(db, cpf, uid);
+      await undoCpf();
       throw exists();
     }
     if (code === 'auth/invalid-email' || code === 'auth/invalid-password') {
-      await releaseCpf(db, cpf, uid);
+      await undoCpf();
       throw bad(code === 'auth/invalid-email' ? 'Informe um e-mail válido.' : 'A senha precisa ter pelo menos 6 caracteres.');
     }
     logger.error('signup: createUser falhou', { uid, code, err: String(err) });
     await cleanupAmbiguousCreate(db, uid, email);
-    await releaseCpf(db, cpf, uid);
+    await undoCpf();
     throw new HttpsError('internal', 'Não foi possível criar a conta. Tente de novo.');
   }
 
@@ -264,9 +307,11 @@ async function signup(request) {
   } catch (err) {
     logger.error('signup: não gravou a conta; desfazendo', { uid, err: String(err) });
     await deleteAuthUser(uid);
-    await releaseCpf(db, cpf, uid);
+    await undoCpf();
     throw new HttpsError('internal', 'Não foi possível criar a conta. Tente de novo.');
   }
+
+  await finishReclaim(db, cpf, uid, reservation);
 
   try {
     return { checkoutUrl: await openCheckout(db, uid) };

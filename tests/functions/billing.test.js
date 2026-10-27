@@ -226,6 +226,7 @@ describe('cadastro, retomada e webhook', () => {
     });
     const fresh = await signupOk(person({ cpf: old.p.cpf }));
     assert.equal((await get('cpfs/' + old.p.cpf)).uid, fresh.uid);
+    assert.equal((await get('cpfs/' + old.p.cpf)).reclaimedFrom, old.uid);
     const oldBilling = await get(`users/${old.uid}/private/billing`);
     assert.equal(oldBilling.cpfReleased, true);
     assert.equal(oldBilling.status, 'pending');
@@ -236,6 +237,46 @@ describe('cadastro, retomada e webhook', () => {
     // A conta antiga não abre outro checkout.
     const token = await signIn(old.p.email, old.p.password);
     assert.equal((await call('resumeCheckout', {}, token)).error.status, 'FAILED_PRECONDITION');
+  });
+
+  it('signup: mesmo CPF e mesmo e-mail depois de 24h não trava a conta antiga', async () => {
+    const old = await signupOk();
+    await db.doc('users/' + old.uid).update({
+      createdAt: admin.firestore.Timestamp.fromMillis(Date.now() - 25 * 3600e3),
+    });
+    const r = await call('signup', old.p);
+    assert.equal(r.error.status, 'ALREADY_EXISTS');
+    assert.equal(r.error.message, MSG_EXISTS);
+    const cpfDoc = await get('cpfs/' + old.p.cpf);
+    assert.equal(cpfDoc.uid, old.uid);
+    const billing = await get(`users/${old.uid}/private/billing`);
+    assert.equal(billing.cpfReleased, undefined);
+    assert.equal(billing.status, 'pending');
+    assert.equal((await get('checkouts/' + old.checkoutId)).status, 'active');
+    const token = await signIn(old.p.email, old.p.password);
+    const again = await call('resumeCheckout', {}, token);
+    assert.equal(again.error, undefined, JSON.stringify(again.error));
+    assert.equal(again.result.checkoutUrl, old.url);
+  });
+
+  it('signup: falha após reclaim devolve o CPF à conta antiga', async () => {
+    const old = await signupOk();
+    await db.doc('users/' + old.uid).update({
+      createdAt: admin.firestore.Timestamp.fromMillis(Date.now() - 25 * 3600e3),
+    });
+    await db.doc('testFaults/signup').set({ failBatch: true });
+    const p = person({ cpf: old.p.cpf });
+    const r = await call('signup', p);
+    assert.equal(r.error.status, 'INTERNAL');
+    await assert.rejects(admin.auth().getUserByEmail(p.email));
+    assert.equal((await get('cpfs/' + old.p.cpf)).uid, old.uid);
+    const billing = await get(`users/${old.uid}/private/billing`);
+    assert.equal(billing.cpfReleased, undefined);
+    assert.equal((await get('checkouts/' + old.checkoutId)).status, 'active');
+    const sent = await (await fetch(`${fake.url}/__checkouts`)).json();
+    assert.equal(sent.find((c) => c.id === old.checkoutId).status, 'ACTIVE');
+    const token = await signIn(old.p.email, old.p.password);
+    assert.equal((await call('resumeCheckout', {}, token)).result.checkoutUrl, old.url);
   });
 
   it('signup: CPF de pendente recente não é liberado', async () => {
