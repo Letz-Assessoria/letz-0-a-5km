@@ -479,6 +479,22 @@ function listAlerts(cb) {
     (err) => { fail(err); cb([]); },
   ));
 }
+// Financeiro (payments/{checkoutId}, escrito só pelo webhook): todas as compras ao vivo.
+function listPayments(cb) {
+  return whenSession((s) => !!(s && s.user && s.claims && s.claims.admin === true), () => onSnapshot(
+    collection(db, 'payments'),
+    (snap) => cb(snap.docs.map((d) => {
+      const x = d.data();
+      return {
+        checkoutId: d.id, uid: x.uid || '', status: x.status || '', method: x.method || '',
+        installments: Number(x.installments) || 0, gross: Number(x.gross) || 0,
+        net: typeof x.net === 'number' ? x.net : null, product: x.product || '',
+        paidAt: ms(x.paidAt), updatedAt: ms(x.updatedAt),
+      };
+    })),
+    (err) => { fail(err); cb([]); },
+  ));
+}
 async function resolveAlert(id) {
   await updateDoc(doc(db, 'alerts', id), { resolved: true });
 }
@@ -508,6 +524,6 @@ window.LetzFB = {
   watchMyPosts, watchFeed, loadMoreFeed, watchRanking, watchConfig,
   loadMyReactions, toggleReaction, addComment, deleteComment, watchComments,
   saveShip, watchShip,
-  saveConfig, listAthletes, listAlerts, resolveAlert, setAccess, setPostHidden, setCommentHidden, setShipPaid, setTrack,
+  saveConfig, listAthletes, listAlerts, listPayments, resolveAlert, setAccess, setPostHidden, setCommentHidden, setShipPaid, setTrack,
 };
 document.dispatchEvent(new Event('letzfb-ready'));

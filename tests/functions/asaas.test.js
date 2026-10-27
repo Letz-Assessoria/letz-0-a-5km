@@ -201,7 +201,7 @@ describe('classifyEvent', () => {
   });
 
   it('classifyEvent: evento desconhecido → ignore', () => {
-    const empty = { kind: 'ignore', uid: null, checkoutId: null, paymentId: null, method: null, installments: null, installmentId: null };
+    const empty = { kind: 'ignore', uid: null, checkoutId: null, paymentId: null, method: null, installments: null, installmentId: null, value: null, netValue: null };
     assert.deepEqual(classifyEvent(events.pixCreated), empty);
     assert.deepEqual(classifyEvent({ event: 'CHECKOUT_EXPIRED', checkout: { id: 'x', externalReference: 'u' } }), empty);
     assert.deepEqual(classifyEvent({ event: 'ALGO_NOVO' }), empty);
