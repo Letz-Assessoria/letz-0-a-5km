@@ -3022,13 +3022,13 @@ function vProfile(){var D=V.draft,first=!S.profiled;
  return header(first?'Seu perfil':'Editar perfil')+
  '<div class="stack" style="gap:6px"><span class="label">'+(first?'Primeiro acesso':'Seu perfil')+'</span><h1 class="disp" style="font-size:clamp(48px,14vw,72px)">Quem é<br>você?</h1><p class="muted">É assim que a turma vai te ver no feed e no ranking.</p></div>'+
  '<label class="pick" for="in-photo"><span class="ring'+(D.photo?' has':'')+'">'+(D.photo?'<img src="'+D.photo+'" alt="Sua foto de perfil">':ic('camera'))+'</span><span>'+(D.photo?'Trocar foto':'Adicionar foto')+'</span><input class="sr" id="in-photo" type="file" accept="image/*"></label>'+
- '<div class="field"><label for="in-pname">Nome</label><input id="in-pname" type="text" maxlength="40" autocomplete="name" placeholder="Seu nome" value="'+esc(D.name)+'"></div>'+
+ '<div class="field"><label for="in-pname">Apelido <span class="muted">(opcional)</span></label><input id="in-pname" type="text" maxlength="40" autocomplete="nickname" placeholder="'+esc((V.sdoc&&V.sdoc.name)||'Seu apelido')+'" value="'+esc(D.name)+'"><small>Se deixar em branco, usamos o nome do cadastro.</small></div>'+
  '<div class="field"><label for="in-handle">Seu @</label><div class="at"><span>@</span><input id="in-handle" type="text" maxlength="30" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="seu.instagram" value="'+esc(D.handle)+'"></div><small>Letras, números, ponto e sublinhado. É o que aparece no feed.</small></div>'+
  (V.perr?'<p class="err" role="alert">'+V.perr+'</p>':'')+
  '<div class="stack" style="gap:8px"><span class="label">Assim você aparece no feed</span><div class="preview"><div class="post">'+(D.photo?'<div class="av me"><img src="'+D.photo+'" alt=""></div>':'<div class="av me" aria-hidden="true" id="pv-ini">'+esc(initials(D.name||D.handle||'?'))+'</div>')+'<div><div><span class="who" id="pv-handle">@'+esc(D.handle||'seu.instagram')+'</span> <span class="muted">· agora</span></div><div class="what">'+ic('run')+'<span>Fez o treino de terça da semana 1</span></div></div></div></div></div>'+
  '<button class="btn go wide" data-act="profile-save">'+(first?'Salvar e continuar':'Salvar')+' '+ic('arrow')+'</button>'+'<button class="linkbtn" data-act="to-privacy">Como usamos seus dados</button>'+
  (first?'':'<button class="btn line wide" data-act="profile-cancel">Cancelar</button>');}
-function openProfile(){V.draft={name:S.name||(V.sdoc&&V.sdoc.name)||'',handle:S.handle,photo:S.photo};V.perr='';V.view='profile';}
+function openProfile(){V.draft={name:S.name&&S.name!==(V.sdoc&&V.sdoc.name)?S.name:'',handle:S.handle,photo:S.photo};V.perr='';V.view='profile';}
 function grab(){var n=document.getElementById('in-pname'),h=document.getElementById('in-handle');if(n)V.draft.name=n.value;if(h)V.draft.handle=h.value;}
 function cleanHandle(v){return LetzCore.cleanHandle(v);}
 function loadPhoto(file){if(!file||!/^image\//.test(file.type)){V.perr='Escolha um arquivo de imagem.';render();return;}
@@ -3340,7 +3340,7 @@ app.addEventListener('click',function(e){var b=e.target.closest('[data-act]');if
  else if(a==='welcome-ok'){S.welcomed=true;save();V.view='athlete';V.tab='treinos';}
  else if(a==='to-profile'){openProfile();}
  else if(a==='profile-cancel'){V.view='athlete';}
- else if(a==='profile-save'){grab();var nm=(V.draft.name||'').trim(),hd=cleanHandle(V.draft.handle||'');
+ else if(a==='profile-save'){grab();var nm=(V.draft.name||'').trim()||((V.sdoc&&V.sdoc.name)||'').trim(),hd=cleanHandle(V.draft.handle||'');
   if(!nm)V.perr='Coloque seu nome.';else if(hd.length<3)V.perr='Seu @ precisa ter pelo menos 3 caracteres.';
   else{S.name=nm;S.handle=hd;S.photo=V.draft.photo||'';var wasFirst=!S.profiled;S.profiled=true;save();V.perr='';V.view=(wasFirst&&!S.welcomed)?'welcome':'athlete';}}
  else if(a==='tab'){V.tab=b.getAttribute('data-t');V.flash='';}
