@@ -42,6 +42,7 @@ function createClient({ baseUrl, apiKey, fetchImpl } = {}) {
       },
     };
     if (body !== undefined) init.body = JSON.stringify(body);
+    init.signal = AbortSignal.timeout(15000);
     const res = await doFetch(`${root}${pathname}`, init);
     const text = await res.text();
     let data = null;
@@ -111,6 +112,8 @@ function createClient({ baseUrl, apiKey, fetchImpl } = {}) {
 const PAID_PAYMENT_EVENTS = new Set(['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED']);
 const REFUND_EVENTS = new Set(['PAYMENT_REFUNDED']);
 const CHARGEBACK_EVENTS = new Set(['PAYMENT_CHARGEBACK_REQUESTED', 'PAYMENT_CHARGEBACK_DISPUTE']);
+// Cartão reprovado pela análise de risco ou captura recusada depois do CHECKOUT_PAID.
+const REJECT_EVENTS = new Set(['PAYMENT_REPROVED_BY_RISK_ANALYSIS', 'PAYMENT_CREDIT_CARD_CAPTURE_REFUSED']);
 const METHODS = new Set(['PIX', 'CREDIT_CARD']);
 
 function ignore() {
@@ -147,6 +150,7 @@ function classifyEvent(body) {
   if (PAID_PAYMENT_EVENTS.has(event)) kind = 'paid';
   else if (REFUND_EVENTS.has(event)) kind = 'refunded';
   else if (CHARGEBACK_EVENTS.has(event)) kind = 'chargeback';
+  else if (REJECT_EVENTS.has(event)) kind = 'rejected';
   if (!kind) return ignore();
 
   const p = body.payment;

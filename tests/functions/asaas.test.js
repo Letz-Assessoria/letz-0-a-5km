@@ -181,6 +181,19 @@ describe('classifyEvent', () => {
     assert.equal(classifyEvent(dispute).kind, 'chargeback');
   });
 
+  it('classifyEvent: reprovado na análise de risco / captura recusada → rejected', () => {
+    for (const event of ['PAYMENT_REPROVED_BY_RISK_ANALYSIS', 'PAYMENT_CREDIT_CARD_CAPTURE_REFUSED']) {
+      const e = structuredClone(events.cardConfirmed);
+      e.event = event;
+      const out = classifyEvent(e);
+      assert.equal(out.kind, 'rejected');
+      assert.equal(out.checkoutId, e.payment.checkoutSession);
+    }
+    const del = structuredClone(events.cardConfirmed);
+    del.event = 'PAYMENT_DELETED';
+    assert.equal(classifyEvent(del).kind, 'ignore');
+  });
+
   it('classifyEvent: evento desconhecido → ignore', () => {
     const empty = { kind: 'ignore', uid: null, checkoutId: null, paymentId: null, method: null, installments: null, installmentId: null };
     assert.deepEqual(classifyEvent(events.pixCreated), empty);

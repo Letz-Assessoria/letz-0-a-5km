@@ -7,6 +7,7 @@ const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestor
 const { getAuth } = require('firebase-admin/auth');
 const core = require('../shared/core.js');
 const { asaasClient, checkoutArgs } = require('./billing-config.js');
+const { safeErr } = require('./safe.js');
 
 // Uma só mensagem para CPF e e-mail repetidos: não revela qual dos dois existe.
 const MSG_EXISTS = 'Já existe um cadastro com este CPF ou e-mail. Entre com seu e-mail e senha ou fale com a Letz.';
@@ -25,7 +26,8 @@ const PENDING_RECLAIM_MS = 24 * HOUR_MS;
 // O checkout salvo só é reaproveitado se ainda tiver esta folga até vencer.
 const REUSE_MARGIN_MS = 5 * 60000;
 // Limite de tentativas de cadastro por IP.
-const RATE_MAX = 5;
+const RATE_MAX = 20; // por IP/hora (CGNAT de operadoras brasileiras)
+const RATE_GLOBAL_MAX = 300; // válvula global: inscrições/hora no total
 const RATE_WINDOW_MS = HOUR_MS;
 
 const exists = () => new HttpsError('already-exists', MSG_EXISTS);
@@ -57,15 +59,6 @@ async function fault(db, name, flag) {
   return (await faultValue(db, name, flag)) === true;
 }
 
-// Texto de erro para log sem CPF nem IP (mensagens do Firestore podem trazer o
-// caminho cpfs/{cpf}). CPF em nenhuma forma (nem hash) vai para o log; os uids bastam.
-function safeErr(err) {
-  return String(err)
-    .replace(/\d{3}\.?\d{3}\.?\d{3}-?\d{2}/g, '[cpf]')
-    .replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, '[ip]')
-    .replace(/\b[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7}\b/gi, '[ip]');
-}
-
 // Conta que perdeu o CPF (ou está perdendo) não paga nem abre checkout.
 const cpfGone = (billing) => !!(billing && (billing.cpfReleased || billing.cpfReclaimPendingBy));
 
@@ -83,22 +76,31 @@ function clientIp(request) {
   return raw.ip ? String(raw.ip) : 'desconhecido';
 }
 
-// Janela fixa de 1 h por IP (hash, para não guardar o IP em claro).
+// Janela fixa de 1 h: um contador por IP (hash, para não guardar o IP em claro) e um
+// contador global (válvula de segurança, caso o IP do cliente seja lido errado).
 async function rateLimit(db, request) {
   const hash = crypto.createHash('sha256').update(clientIp(request)).digest('hex');
-  const ref = db.doc('rateLimits/signup_' + hash);
+  const refs = [
+    { ref: db.doc('rateLimits/signup_' + hash), max: RATE_MAX },
+    { ref: db.doc('rateLimits/signup_global'), max: RATE_GLOBAL_MAX },
+  ];
   await db.runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
+    const snaps = await Promise.all(refs.map((r) => tx.get(r.ref)));
     const now = Date.now();
-    const start = snap.exists && snap.get('windowStart') ? snap.get('windowStart').toMillis() : 0;
-    if (!snap.exists || now - start >= RATE_WINDOW_MS) {
-      tx.set(ref, {
-        windowStart: Timestamp.fromMillis(now), count: 1, expiresAt: Timestamp.fromMillis(now + RATE_WINDOW_MS),
-      });
-      return;
-    }
-    if ((snap.get('count') || 0) >= RATE_MAX) throw new HttpsError('resource-exhausted', MSG_RATE);
-    tx.update(ref, { count: FieldValue.increment(1) });
+    const writes = [];
+    snaps.forEach((snap, i) => {
+      const { ref, max } = refs[i];
+      const start = snap.exists && snap.get('windowStart') ? snap.get('windowStart').toMillis() : 0;
+      if (!snap.exists || now - start >= RATE_WINDOW_MS) {
+        writes.push(() => tx.set(ref, {
+          windowStart: Timestamp.fromMillis(now), count: 1, expiresAt: Timestamp.fromMillis(now + RATE_WINDOW_MS),
+        }));
+        return;
+      }
+      if ((snap.get('count') || 0) >= max) throw new HttpsError('resource-exhausted', MSG_RATE);
+      writes.push(() => tx.update(ref, { count: FieldValue.increment(1) }));
+    });
+    writes.forEach((w) => w());
   });
 }
 

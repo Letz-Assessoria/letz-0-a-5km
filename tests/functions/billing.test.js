@@ -6,6 +6,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { startFakeAsaas } from '../fake-asaas.mjs';
 
 const require = createRequire(new URL('../../functions/package.json', import.meta.url));
@@ -123,7 +124,7 @@ function payment(fixture, checkoutId, { id, paymentId, n, event } = {}) {
 }
 
 async function wipe() {
-  for (const c of ['users', 'cpfs', 'checkouts', 'asaasEvents', 'config', 'rateLimits', 'testFaults']) {
+  for (const c of ['users', 'cpfs', 'checkouts', 'asaasEvents', 'config', 'rateLimits', 'testFaults', 'alerts']) {
     await db.recursiveDelete(db.collection(c));
   }
   await fetch(`${AUTH}/emulator/v1/projects/${PROJECT}/accounts`, { method: 'DELETE' });
@@ -388,25 +389,38 @@ describe('cadastro, retomada e webhook', () => {
     assert.equal((await get(`users/${old.uid}/private/billing`)).cpfReleased, undefined);
   });
 
-  it('signup: 6ª tentativa do mesmo IP em 1h é bloqueada', async () => {
-    for (let i = 0; i < 5; i++) {
-      const r = await call('signup', person());
-      assert.equal(r.error, undefined, JSON.stringify(r.error));
-    }
+  const ipDoc = (ip) => 'rateLimits/signup_' + createHash('sha256').update(ip).digest('hex');
+  const seedLimit = (path, count) => db.doc(path).set({
+    windowStart: admin.firestore.Timestamp.now(), count, expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() + 3600e3),
+  });
+
+  it('signup: 21ª tentativa do mesmo IP em 1h é bloqueada', async () => {
+    const h = { 'x-forwarded-for': '203.0.113.5' };
+    await seedLimit(ipDoc('203.0.113.5'), 19);
+    const ok = await call('signup', person(), null, h);
+    assert.equal(ok.error, undefined, JSON.stringify(ok.error));
     const p = person();
-    const r = await call('signup', p);
+    const r = await call('signup', p, null, h);
     assert.equal(r.error.status, 'RESOURCE_EXHAUSTED');
     assert.equal(r.error.message, 'Muitas tentativas. Tente de novo em alguns minutos.');
     await assert.rejects(admin.auth().getUserByEmail(p.email));
+    assert.equal((await get(ipDoc('203.0.113.5'))).count, 20);
+  });
+
+  it('signup: válvula global de 300/h bloqueia qualquer IP e conta cada inscrição', async () => {
+    const ok = await call('signup', person(), null, { 'x-forwarded-for': '203.0.113.50' });
+    assert.equal(ok.error, undefined, JSON.stringify(ok.error));
+    assert.equal((await get('rateLimits/signup_global')).count, 1);
+    await seedLimit('rateLimits/signup_global', 300);
+    const r = await call('signup', person(), null, { 'x-forwarded-for': '203.0.113.51' });
+    assert.equal(r.error.status, 'RESOURCE_EXHAUSTED');
+    assert.equal(r.error.message, 'Muitas tentativas. Tente de novo em alguns minutos.');
   });
 
   it('signup: x-forwarded-for forjado não burla o limite', async () => {
     // Só o último salto (o que o front-end do Google acrescenta) conta.
+    await seedLimit(ipDoc('198.51.100.7'), 20);
     const xff = (i) => ({ 'x-forwarded-for': `10.0.0.${i}, 203.0.113.${i}, 198.51.100.7` });
-    for (let i = 0; i < 5; i++) {
-      const r = await call('signup', person(), null, xff(i));
-      assert.equal(r.error, undefined, JSON.stringify(r.error));
-    }
     const r = await call('signup', person(), null, xff(99));
     assert.equal(r.error.status, 'RESOURCE_EXHAUSTED');
     // Outro IP real (último salto diferente) não é afetado.
@@ -666,9 +680,69 @@ describe('cadastro, retomada e webhook', () => {
     assert.equal((await get('checkouts/' + other)).status, 'paid');
   });
 
-  it('webhook: uid desconhecido responde 200', async () => {
+  const alerts = async () => (await db.collection('alerts').get()).docs.map((d) => d.data());
+
+  it('webhook: uid desconhecido responde 200 e gera alerta unknown-uid', async () => {
     assert.equal((await hook(payment('pixReceived', 'checkout-que-nao-existe'))).status, 200);
-    assert.equal((await hook(checkoutPaid('uid-que-nao-existe', 'outro-checkout'))).status, 200);
+    assert.equal((await alerts()).length, 0); // checkout desconhecido, sem uid: não é nosso
+    const e = checkoutPaid('uid-que-nao-existe', 'outro-checkout');
+    assert.equal((await hook(e)).status, 200);
+    const list = await alerts();
+    assert.equal(list.length, 1);
+    assert.equal(list[0].type, 'unknown-uid');
+    assert.equal(list[0].uid, 'uid-que-nao-existe');
+    assert.equal(list[0].eventId, e.id);
+    assert.equal(list[0].resolved, false);
+  });
+
+  it('webhook: externalReference/checkout com barras ou espaços → 200 e nada gravado', async () => {
+    for (const bad of ['pedido/123', 'a b', '../users/x', 'x'.repeat(200), 'users/a/private/billing']) {
+      assert.equal((await hook(checkoutPaid(bad, 'ck-foreign-1'))).status, 200);
+      assert.equal((await hook(checkoutPaid('uid-ok', bad))).status, 200);
+      assert.equal((await hook(payment('pixReceived', bad))).status, 200);
+    }
+    const e = checkoutPaid('uid-ok', 'ck-1', 'evt/com/barra');
+    assert.equal((await hook(e)).status, 200);
+    assert.equal((await db.collection('users').get()).size, 0);
+    assert.equal((await db.collection('alerts').get()).size, 0);
+    // evento com id inválido não é gravado (nem com '/' trocado por '_').
+    assert.equal((await db.doc('asaasEvents/evt_com_barra').get()).exists, false);
+  });
+
+  it('webhook: cartão reprovado pela análise de risco bloqueia', async () => {
+    const { uid, checkoutId } = await signupOk();
+    await hook(checkoutPaid(uid, checkoutId));
+    assert.equal((await get('users/' + uid)).access, 'active');
+    const res = await hook(payment('cardConfirmed', checkoutId, { event: 'PAYMENT_REPROVED_BY_RISK_ANALYSIS' }));
+    assert.equal(res.status, 200);
+    assert.equal((await get('users/' + uid)).access, 'blocked');
+    assert.equal((await get(`users/${uid}/private/billing`)).status, 'rejected');
+    assert.equal((await get('checkouts/' + checkoutId)).status, 'rejected');
+  });
+
+  it('webhook: captura recusada do cartão também bloqueia', async () => {
+    const { uid, checkoutId } = await signupOk();
+    await hook(payment('cardConfirmed', checkoutId));
+    await hook(payment('cardConfirmed', checkoutId, { event: 'PAYMENT_CREDIT_CARD_CAPTURE_REFUSED' }));
+    assert.equal((await get('users/' + uid)).access, 'blocked');
+  });
+
+  it('webhook: duplicate-payment e cpf-conflict geram alerta uma vez só', async () => {
+    const { uid, checkoutId } = await signupOk();
+    await hook(checkoutPaid(uid, checkoutId));
+    const other = 'checkout-duplicado-2';
+    await db.doc('checkouts/' + other).set({ uid, status: 'active', createdAt: new Date(), expiresAt: new Date() });
+    await hook(payment('pixReceived', other));
+    await hook(payment('pixReceived', other, { n: 2 }));
+    const list = await alerts();
+    assert.equal(list.filter((a) => a.type === 'duplicate-payment').length, 1);
+    assert.equal(list[0].uid, uid);
+
+    const old = await signupOk();
+    await db.doc('users/' + old.uid).update({ createdAt: admin.firestore.Timestamp.fromMillis(Date.now() - 25 * 3600e3) });
+    await signupOk(person({ cpf: old.p.cpf }));
+    await hook(payment('pixReceived', old.checkoutId));
+    assert.equal((await alerts()).filter((a) => a.type === 'cpf-conflict').length, 1);
   });
 
   it('webhook: evento ignorado responde 200', async () => {

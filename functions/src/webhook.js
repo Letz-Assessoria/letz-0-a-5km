@@ -5,8 +5,16 @@ const logger = require('firebase-functions/logger');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { classifyEvent } = require('./asaas.js');
 const { ASAAS_WEBHOOK_TOKEN } = require('./billing-config.js');
+const { safeErr } = require('./safe.js');
 
-const CLOSED = new Set(['refunded', 'chargeback']);
+const CLOSED = new Set(['refunded', 'chargeback', 'rejected']);
+
+// Ids que viram caminho de documento: nunca confie no que vem do evento. O evento
+// pode ser de outro produto da mesma conta Asaas, com externalReference qualquer.
+const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+// Id do evento do Asaas: "evt_<hex>&<número>".
+const EVENT_ID_RE = /^[A-Za-z0-9_&.-]{1,200}$/;
+const validId = (v) => typeof v === 'string' && ID_RE.test(v);
 
 function tokenOk(given, expected) {
   if (typeof given !== 'string' || !given || !expected) return false;
@@ -16,14 +24,17 @@ function tokenOk(given, expected) {
 }
 
 // Aplica um evento 'paid'. Devolve uma descrição curta do que fez (para o log).
-function applyPaid(tx, refs, ev, { billing, checkout }) {
+function applyPaid(tx, refs, ev, { billing, checkout }, alert) {
   const now = FieldValue.serverTimestamp();
   if (checkout && CLOSED.has(checkout.status)) return 'pago atrasado de checkout já ' + checkout.status;
   if (CLOSED.has(billing.status) && billing.checkoutId === ev.checkoutId) return 'pago atrasado: billing já ' + billing.status;
 
   if (billing.status === 'paid' && billing.checkoutId !== ev.checkoutId) {
     if (refs.checkout && checkout) tx.update(refs.checkout, { status: 'paid' });
-    if (!billing.duplicate) tx.update(refs.billing, { duplicate: true, updatedAt: now });
+    if (!billing.duplicate) {
+      tx.update(refs.billing, { duplicate: true, updatedAt: now });
+      alert('duplicate-payment');
+    }
     return 'duplicate';
   }
 
@@ -34,7 +45,10 @@ function applyPaid(tx, refs, ev, { billing, checkout }) {
   }
   // CPF já foi (ou está indo) para outro cadastro, mas a pessoa pagou: ativa e sinaliza.
   const cpfGone = billing.cpfReleased === true || !!billing.cpfReclaimPendingBy;
-  if (cpfGone && !billing.cpfConflict) update.cpfConflict = true;
+  if (cpfGone && !billing.cpfConflict) {
+    update.cpfConflict = true;
+    alert('cpf-conflict');
+  }
   if (ev.method && billing.method !== ev.method) update.method = ev.method;
   if (ev.installments && billing.installments !== ev.installments) update.installments = ev.installments;
   if (ev.paymentId && !billing.paymentId) update.paymentId = ev.paymentId;
@@ -55,8 +69,14 @@ function applyClosed(tx, refs, ev, { billing, checkout }) {
 }
 
 async function processEvent(db, body) {
-  const eventId = String(body.id).replace(/\//g, '_');
+  if (typeof body.id !== 'string' || !EVENT_ID_RE.test(body.id)) return { result: 'ignorado', warn: 'id de evento inválido' };
+  const eventId = body.id;
   const ev = classifyEvent(body);
+  // Valores fora do formato nunca viram caminho de documento.
+  if (ev.uid && !validId(ev.uid)) ev.uid = null;
+  if (ev.checkoutId && !validId(ev.checkoutId)) {
+    return { result: 'ignorado', warn: 'checkoutId fora do formato', ev };
+  }
   const eventRef = db.doc('asaasEvents/' + eventId);
 
   return db.runTransaction(async (tx) => {
@@ -67,11 +87,12 @@ async function processEvent(db, body) {
     const coSnap = coRef ? await tx.get(coRef) : null;
     const checkout = coSnap && coSnap.exists ? coSnap.data() : null;
     // checkouts/{id} foi gravado por nós; vale mais que o externalReference do evento.
-    let uid = ev.uid || (checkout && checkout.uid) || null;
+    const ours = checkout && validId(checkout.uid) ? checkout.uid : null;
+    let uid = ev.uid || ours;
     let mismatch = null;
-    if (ev.uid && checkout && checkout.uid && checkout.uid !== ev.uid) {
-      mismatch = { eventUid: ev.uid, checkoutUid: checkout.uid };
-      uid = checkout.uid;
+    if (ev.uid && ours && ours !== ev.uid) {
+      mismatch = { eventUid: ev.uid, checkoutUid: ours };
+      uid = ours;
     }
 
     // Todas as leituras antes da primeira escrita (regra das transações).
@@ -89,12 +110,22 @@ async function processEvent(db, body) {
       paymentId: ev.paymentId,
       at: FieldValue.serverTimestamp(),
     });
+    // Pago e não aplicado (ou que precisa do olho do treinador): alerta no painel.
+    const alert = (type) => tx.create(db.collection('alerts').doc(), {
+      type, uid: uid || null, checkoutId: ev.checkoutId || null, eventId, at: FieldValue.serverTimestamp(), resolved: false,
+    });
     if (ev.kind === 'ignore') return { result: 'ignorado' };
-    if (!uid) return { error: 'uid desconhecido', ev };
-    if (!userSnap.exists || !billingSnap.exists) return { error: 'uid sem conta ou billing', ev, uid, mismatch };
+    if (!uid || !userSnap.exists || !billingSnap.exists) {
+      // Só vira alerta se parece nosso (uid no evento ou checkout nosso) e é pagamento.
+      if (ev.kind === 'paid' && (ev.uid || ours)) {
+        alert('unknown-uid');
+        return { error: 'uid sem conta ou billing', ev, uid, mismatch };
+      }
+      return { result: 'ignorado', warn: 'evento sem conta nossa', ev, uid, mismatch };
+    }
 
     const state = { billing: billingSnap.data(), checkout };
-    const result = ev.kind === 'paid' ? applyPaid(tx, refs, ev, state) : applyClosed(tx, refs, ev, state);
+    const result = ev.kind === 'paid' ? applyPaid(tx, refs, ev, state, alert) : applyClosed(tx, refs, ev, state);
     return { result, uid, mismatch };
   });
 }
@@ -121,7 +152,9 @@ async function asaasWebhook(req, res) {
         eventId: body.id, ...out.mismatch,
       });
     }
-    if (out.error) {
+    if (out.warn) {
+      logger.warn('asaasWebhook: ' + out.warn, { event: typeof body.event === 'string' ? body.event.slice(0, 60) : null });
+    } else if (out.error) {
       logger.error('asaasWebhook: ' + out.error, {
         eventId: body.id, event: body.event, uid: out.uid || null, checkoutId: out.ev.checkoutId, paymentId: out.ev.paymentId,
       });
@@ -135,7 +168,7 @@ async function asaasWebhook(req, res) {
     res.status(200).send('ok');
   } catch (err) {
     // 500 faz o Asaas reenviar; o evento não foi gravado porque a transação falhou.
-    logger.error('asaasWebhook: falha ao processar', { eventId: body.id, err: String(err) });
+    logger.error('asaasWebhook: falha ao processar', { eventId: body.id, err: safeErr(err) });
     res.status(500).send('error');
   }
 }
