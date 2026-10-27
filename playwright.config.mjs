@@ -19,7 +19,7 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: 'firebase emulators:start --project demo-letz',
+    command: 'node scripts/make-test-rules.mjs && firebase emulators:start --config firebase.test.json --project demo-letz',
     url: 'http://127.0.0.1:5050',
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,

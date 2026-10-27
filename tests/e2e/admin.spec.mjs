@@ -221,3 +221,18 @@ test('treinador abre #/admin/atletas direto', async ({ page }) => {
   await expect(page).toHaveURL(/#\/admin\/atletas$/);
   await expect(page.getByRole('heading', { name: 'Painel' })).toBeVisible();
 });
+
+test('alertas de pagamento aparecem no topo da aba Atletas e podem ser resolvidos', async ({ page }) => {
+  const s = await makeUser('pending', { profiled: true, welcomed: true, handle: uniqueHandle() });
+  await withProfile(s);
+  const ref = await db.collection('alerts').add({
+    type: 'duplicate-payment', uid: s.uid, checkoutId: 'ck-e2e', eventId: 'evt-e2e', at: new Date(), resolved: false,
+  });
+  await coachPanel(page, 'Atletas');
+  const box = page.locator('[data-alerts]');
+  await expect(box).toContainText('Atenção: 1 alerta de pagamento');
+  await expect(box).toContainText('Segundo pagamento de conta já paga');
+  await box.getByRole('button', { name: 'Marcar resolvido' }).click();
+  await expect(box).toHaveCount(0);
+  await waitUntil(async () => (await ref.get()).data().resolved === true);
+});

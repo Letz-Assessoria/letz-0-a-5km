@@ -180,7 +180,19 @@ describe('firestore.rules', () => {
       await assertFails(updateDoc(ref, { handle: h }));
     }
     await assertSucceeds(updateDoc(ref, { name: 'x'.repeat(80), photoURL: '' }));
-    await assertSucceeds(updateDoc(ref, { photoURL: 'http://127.0.0.1:9199/v0/b/demo-letz.appspot.com/o/a.jpg' }));
+    await assertFails(updateDoc(ref, { photoURL: 'http://127.0.0.1:9199/v0/b/demo-letz.appspot.com/o/a.jpg' }));
+    await assertSucceeds(updateDoc(ref, { photoURL: 'https://firebasestorage.googleapis.com/v0/b/demo-letz.appspot.com/o/a.jpg' }));
+  });
+
+  it('alerts: aluno não lê nem escreve; admin lê e só marca resolved', async () => {
+    await seed((f) => setDoc(doc(f, 'alerts', 'a1'), { type: 'unknown-uid', uid: null, checkoutId: null, eventId: 'e', resolved: false }));
+    await assertFails(getDoc(doc(db(ALICE), 'alerts', 'a1')));
+    await assertFails(updateDoc(doc(db(ALICE), 'alerts', 'a1'), { resolved: true }));
+    await assertFails(setDoc(doc(adminDb(), 'alerts', 'a2'), { resolved: false }));
+    await assertFails(deleteDoc(doc(adminDb(), 'alerts', 'a1')));
+    await assertSucceeds(getDoc(doc(adminDb(), 'alerts', 'a1')));
+    await assertFails(updateDoc(doc(adminDb(), 'alerts', 'a1'), { type: 'x' }));
+    await assertSucceeds(updateDoc(doc(adminDb(), 'alerts', 'a1'), { resolved: true }));
   });
 
   it('handles: não apaga handle de outro', async () => {

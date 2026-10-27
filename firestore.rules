@@ -15,13 +15,12 @@ service cloud.firestore {
     function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
     function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
     function myProfile() { return get(me()).data; }
-    // URL de imagem: vazia ou do Firebase Storage. O host do emulador do Storage
-    // (127.0.0.1/localhost:9199, caminho /v0/b/) é aceito para testes locais: só
-    // aponta para a máquina de quem vê, sem rastreio externo.
+    // URL de imagem: vazia ou do Firebase Storage. Em produção só o host real.
+    // Os testes locais usam uma cópia gerada por scripts/make-test-rules.mjs que
+    // acrescenta o host do emulador; esta regra NÃO o aceita.
     function imgUrlOk(v) {
       return v is string && v.size() <= 2048 && (v == ''
-        || v.matches('^https://firebasestorage[.]googleapis[.]com/v0/b/.*')
-        || v.matches('^http://(127[.]0[.]0[.]1|localhost):9199/v0/b/.*'));
+        || v.matches('^https://firebasestorage[.]googleapis[.]com/v0/b/.*'));
     }
     // Se o handle foi criado ou trocado, a reserva handles/{novo} do próprio uid
     // tem que existir ao fim da mesma transação/batch.
@@ -96,6 +95,14 @@ service cloud.firestore {
     // ---------- só Functions ----------
     match /cpfs/{cpf} { allow read, write: if false; }
     match /asaasEvents/{eventId} { allow read, write: if false; }
+
+    // ---------- alerts (pagamento sem ativação; escritos pelo webhook) ----------
+    match /alerts/{id} {
+      allow read: if isAdmin();
+      allow update: if isAdmin() && changed().hasOnly(['resolved'])
+        && request.resource.data.resolved is bool;
+      allow create, delete: if false;
+    }
 
     // ---------- config ----------
     match /config/{docId} {

@@ -33,7 +33,7 @@ const LOCAL = { apiKey: 'fake-api-key', authDomain: 'localhost', projectId: 'dem
 const host = location.hostname;
 const local = host === 'localhost' || host === '127.0.0.1';
 const config = local ? LOCAL
-  : (host === 'letz-0-aos-5km.web.app' || host === 'letz-0-aos-5km.firebaseapp.com') ? PROD : DEV;
+  : (host.startsWith('letz-0-aos-5km-dev.') || host.startsWith('letz-0-aos-5km--')) ? DEV : PROD; // domínio desconhecido = PROD
 
 const app = initializeApp(config);
 const auth = getAuth(app);
@@ -467,6 +467,20 @@ async function refreshAthlete(uid) {
   athletes.set(uid, { ...prev, ship: s.exists() ? athleteRow(uid, {}, null, null, s.data()).ship : null });
   emitAthletes();
 }
+// Alertas de pagamento (escritos pelo webhook): só os não resolvidos, mais novos primeiro.
+function listAlerts(cb) {
+  return whenSession((s) => !!(s && s.user && s.claims && s.claims.admin === true), () => onSnapshot(
+    query(collection(db, 'alerts'), where('resolved', '==', false)),
+    (snap) => cb(snap.docs.map((d) => {
+      const x = d.data();
+      return { id: d.id, type: x.type || '', uid: x.uid || null, checkoutId: x.checkoutId || null, at: ms(x.at) };
+    }).sort((a, c) => (c.at || 0) - (a.at || 0))),
+    (err) => { fail(err); cb([]); },
+  ));
+}
+async function resolveAlert(id) {
+  await updateDoc(doc(db, 'alerts', id), { resolved: true });
+}
 async function setAccess(uid, access) {
   if (access !== 'active' && access !== 'blocked') throw new Error('acesso inválido');
   await updateDoc(doc(db, 'users', uid), { access });
@@ -493,6 +507,6 @@ window.LetzFB = {
   watchMyPosts, watchFeed, loadMoreFeed, watchRanking, watchConfig,
   loadMyReactions, toggleReaction, addComment, deleteComment, watchComments,
   saveShip, watchShip,
-  saveConfig, listAthletes, setAccess, setPostHidden, setCommentHidden, setShipPaid, setTrack,
+  saveConfig, listAthletes, listAlerts, resolveAlert, setAccess, setPostHidden, setCommentHidden, setShipPaid, setTrack,
 };
 document.dispatchEvent(new Event('letzfb-ready'));
