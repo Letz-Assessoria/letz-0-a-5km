@@ -4,9 +4,12 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.19.0/fireba
 import {
   getAuth, connectAuthEmulator, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail,
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
-import { getFirestore, connectFirestoreEmulator, doc, onSnapshot } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
+import {
+  getFirestore, connectFirestoreEmulator, doc, collection, onSnapshot, getDoc, getDocs, setDoc, updateDoc, deleteDoc, addDoc,
+  query, where, orderBy, limit, runTransaction, serverTimestamp,
+} from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-functions.js';
-import { getStorage, connectStorageEmulator } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-storage.js';
+import { getStorage, connectStorageEmulator, ref as sref, uploadBytes, getDownloadURL, deleteObject } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-storage.js';
 
 // Config Web (pública por natureza). prod só nos domínios de produção; o resto usa dev.
 const PROD = {
@@ -129,11 +132,18 @@ async function signup(data) {
     }
     throw err;
   }
-  await login(data.email, data.password);
+  try {
+    await login(data.email, data.password);
+  } catch {
+    throw Object.assign(new Error('Conta criada.'), { code: 'letz/account-created' });
+  }
   return { checkoutUrl };
 }
 
 const AUTH_MSG = {
+  'letz/account-created': 'Sua conta foi criada, mas não conseguimos entrar agora. Entre com seu e-mail e senha para concluir o pagamento.',
+  'letz/handle-taken': 'Esse @ já está em uso. Escolha outro.',
+  'permission-denied': 'Isso não é permitido agora. Confira se a semana já abriu e se o seu acesso está ativo.',
   'auth/invalid-credential': 'E-mail ou senha incorretos.',
   'auth/wrong-password': 'E-mail ou senha incorretos.',
   'auth/user-not-found': 'E-mail ou senha incorretos.',
@@ -169,8 +179,237 @@ function errorMessage(err) {
   return 'Algo deu errado. Tente de novo.';
 }
 
+// ---------- dados do aluno (Firestore e Storage) ----------
+const JPEG = { contentType: 'image/jpeg' };
+const ms = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : (typeof t === 'number' ? t : null));
+
+function mine() {
+  const s = session;
+  if (!s || !s.user || !s.doc) throw Object.assign(new Error('Sessão não encontrada.'), { code: 'unauthenticated' });
+  return { uid: s.user.uid, u: s.doc };
+}
+const postId = (uid, w, d) => `${uid}_${w}-${d}`;
+const postRef = (w, d) => { const { uid } = mine(); return doc(db, 'posts', postId(uid, w, d)); };
+
+// Roda `start(session)` quando a sessão permite e refaz se o usuário trocar; devolve o "parar".
+function whenSession(ok, start) {
+  let stop = null;
+  let key = null;
+  const off = onSession((s) => {
+    const k = ok(s) ? s.user.uid : null;
+    if (k === key) return;
+    if (stop) { stop(); stop = null; }
+    key = k;
+    if (k) stop = start(s);
+  });
+  return () => { off(); if (stop) stop(); stop = null; };
+}
+const canRead = (s) => !!(s && s.user && ((s.claims && s.claims.admin === true) || (s.doc && s.doc.access === 'active')));
+const isAthlete = (s) => !!(s && s.user && s.doc && s.doc.access === 'active' && !(s.claims && s.claims.admin));
+const fail = (err) => console.error(err);
+
+const mapPost = (d) => {
+  const x = d.data({ serverTimestamps: 'estimate' });
+  return { ...x, id: d.id, at: ms(x.at) || Date.now() };
+};
+
+// Perfil: foto em avatars/{uid}.jpg e, numa transação, users/{uid} + reserva do @ em handles/.
+async function saveProfile({ name, handle, photoBlob }) {
+  const { uid, u } = mine();
+  const old = u.handle || '';
+  const hRef = doc(db, 'handles', handle);
+  const taken = () => Object.assign(new Error('Esse @ já está em uso.'), { code: 'letz/handle-taken' });
+  if (handle !== old) {
+    const s = await getDoc(hRef);
+    if (s.exists() && s.data().uid !== uid) throw taken();
+  }
+  let photoURL = u.photoURL || '';
+  if (photoBlob) {
+    const r = sref(storage, `avatars/${uid}.jpg`);
+    await uploadBytes(r, photoBlob, JPEG);
+    photoURL = await getDownloadURL(r);
+  }
+  try {
+    await runTransaction(db, async (tx) => {
+      const hs = await tx.get(hRef);
+      if (hs.exists() && hs.data().uid !== uid) throw taken();
+      if (!hs.exists()) tx.set(hRef, { uid });
+      tx.update(doc(db, 'users', uid), { name, handle, photoURL, profiled: true });
+      if (old && old !== handle) tx.delete(doc(db, 'handles', old));
+    });
+  } catch (err) {
+    if (err && err.code === 'permission-denied' && handle !== old) throw taken();
+    throw err;
+  }
+}
+
+// Treinos: um post por treino; a Function soma os pontos.
+async function markWelcomed() {
+  const { uid } = mine();
+  await updateDoc(doc(db, 'users', uid), { welcomed: true });
+}
+
+async function markWorkout(w, d) {
+  const { uid, u } = mine();
+  await setDoc(postRef(w, d), {
+    uid, handle: u.handle, name: u.name, photoURL: u.photoURL || '', w, d, at: serverTimestamp(),
+    comment: '', photoPath: '', imgURL: '', hidden: false, authorActive: true,
+  });
+}
+
+async function unmarkWorkout(w, d) {
+  const { uid } = mine();
+  const r = postRef(w, d);
+  // Os comentários são de quem comentou: as regras só deixam apagar os próprios (melhor esforço).
+  try {
+    const cs = await getDocs(collection(r, 'comments'));
+    await Promise.all(cs.docs.map((c) => deleteDoc(c.ref).catch(() => {})));
+  } catch (err) { fail(err); }
+  await deleteDoc(r);
+  try { await deleteObject(sref(storage, `workouts/${uid}/${w}-${d}.jpg`)); } catch { /* sem foto */ }
+}
+
+async function setWorkoutContent(w, d, { comment, photoBlob }) {
+  const { uid } = mine();
+  const patch = {};
+  if (typeof comment === 'string') patch.comment = comment;
+  if (photoBlob) {
+    const path = `workouts/${uid}/${w}-${d}.jpg`;
+    const r = sref(storage, path);
+    await uploadBytes(r, photoBlob, JPEG);
+    patch.photoPath = path;
+    patch.imgURL = await getDownloadURL(r);
+  }
+  await updateDoc(postRef(w, d), patch);
+}
+
+async function clearWorkoutContent(w, d, what) {
+  const { uid } = mine();
+  if (what === 'photo') {
+    await updateDoc(postRef(w, d), { photoPath: '', imgURL: '' });
+    try { await deleteObject(sref(storage, `workouts/${uid}/${w}-${d}.jpg`)); } catch { /* já não existe */ }
+  } else {
+    await updateDoc(postRef(w, d), { comment: '' });
+  }
+}
+
+function watchMyPosts(cb) {
+  return whenSession(isAthlete, (s) => onSnapshot(
+    query(collection(db, 'posts'), where('uid', '==', s.user.uid)),
+    (snap) => cb(snap.docs.map(mapPost)), (err) => { fail(err); cb([]); },
+  ));
+}
+
+// Feed da turma: do mais novo para o mais antigo, `pageSize` por vez (loadMoreFeed traz mais).
+let feedSize = 20;
+let feedStep = 20;
+let feedRestart = null;
+function watchFeed(cb, pageSize = 20) {
+  feedStep = pageSize;
+  feedSize = pageSize;
+  let off = null;
+  const run = () => {
+    if (off) off();
+    off = whenSession(canRead, () => onSnapshot(
+      query(collection(db, 'posts'), where('authorActive', '==', true), orderBy('at', 'desc'), limit(feedSize)),
+      (snap) => cb(snap.docs.map(mapPost), { more: snap.size >= feedSize }),
+      (err) => { fail(err); cb([], { more: false, error: true }); },
+    ));
+  };
+  feedRestart = run;
+  run();
+  return () => { feedRestart = null; if (off) off(); off = null; };
+}
+function loadMoreFeed() {
+  feedSize += feedStep;
+  if (feedRestart) feedRestart();
+}
+
+function watchRanking(cb) {
+  return whenSession(canRead, () => onSnapshot(
+    query(collection(db, 'users'), where('access', '==', 'active'), orderBy('points', 'desc')),
+    (snap) => cb(snap.docs.map((d) => ({ uid: d.id, ...d.data() }))),
+    (err) => { fail(err); cb([], { error: true }); },
+  ));
+}
+
+function watchConfig(cb) {
+  return whenSession(canRead, () => onSnapshot(doc(db, 'config', 'app'),
+    (snap) => {
+      if (!snap.exists()) { cb(null); return; }
+      const x = snap.data();
+      cb({ ...x, start: ms(x.start) });
+    },
+    (err) => { fail(err); cb(null); }));
+}
+
+// Reações: um doc por aluno em posts/{id}/reactions/{uid}; a Function conta em posts.rc.
+async function loadMyReactions(ids) {
+  const { uid } = mine();
+  const out = {};
+  await Promise.all(ids.map(async (id) => {
+    try {
+      const s = await getDoc(doc(db, 'posts', id, 'reactions', uid));
+      out[id] = s.exists() ? s.data() : {};
+    } catch (err) { fail(err); }
+  }));
+  return out;
+}
+
+async function toggleReaction(id, r) {
+  const { uid } = mine();
+  const rr = doc(db, 'posts', id, 'reactions', uid);
+  const s = await getDoc(rr);
+  const cur = s.exists() ? s.data() : {};
+  const next = { oi: false, clap: false, fire: false, power: false, love: false, ...cur, [r]: !cur[r] };
+  await setDoc(rr, next);
+  return next;
+}
+
+async function addComment(id, text) {
+  const { uid, u } = mine();
+  await addDoc(collection(db, 'posts', id, 'comments'), {
+    uid, handle: u.handle, text, at: serverTimestamp(), hidden: false,
+  });
+}
+async function deleteComment(id, cid) {
+  await deleteDoc(doc(db, 'posts', id, 'comments', cid));
+}
+function watchComments(id, cb) {
+  return whenSession(canRead, () => onSnapshot(
+    query(collection(db, 'posts', id, 'comments'), orderBy('at', 'asc')),
+    (snap) => cb(snap.docs.map((d) => {
+      const x = d.data({ serverTimestamps: 'estimate' });
+      return { ...x, id: d.id, at: ms(x.at) || Date.now() };
+    })),
+    fail,
+  ));
+}
+
+// Endereço da medalha: users/{uid}/private/ship (merge para não apagar paidAt/track do treinador).
+const SHIP_KEYS = ['nome', 'cep', 'rua', 'num', 'comp', 'bairro', 'cidade', 'uf', 'tel'];
+async function saveShip(addr) {
+  const { uid } = mine();
+  const data = { at: serverTimestamp() };
+  SHIP_KEYS.forEach((k) => { data[k] = String(addr[k] || ''); });
+  await setDoc(doc(db, 'users', uid, 'private', 'ship'), data, { merge: true });
+}
+function watchShip(cb) {
+  return whenSession(isAthlete, (s) => onSnapshot(doc(db, 'users', s.user.uid, 'private', 'ship'),
+    (snap) => {
+      if (!snap.exists()) { cb(null); return; }
+      const x = snap.data({ serverTimestamps: 'estimate' });
+      cb({ ...x, at: ms(x.at), paidAt: ms(x.paidAt) });
+    },
+    (err) => { fail(err); cb(null); }));
+}
+
 window.LetzFB = {
   app, auth, db, functions, storage,
   onSession, signup, login, logout, resetPassword, resumeCheckout, errorMessage,
+  saveProfile, markWelcomed, markWorkout, unmarkWorkout, setWorkoutContent, clearWorkoutContent,
+  watchMyPosts, watchFeed, loadMoreFeed, watchRanking, watchConfig,
+  loadMyReactions, toggleReaction, addComment, deleteComment, watchComments,
+  saveShip, watchShip,
 };
 document.dispatchEvent(new Event('letzfb-ready'));

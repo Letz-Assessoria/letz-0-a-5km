@@ -89,3 +89,64 @@ export async function makeCoach() {
 export async function clearRateLimits() {
   await db.recursiveDelete(db.collection('rateLimits'));
 }
+
+// Aluno com 24 treinos incluindo o 10-2 (medalha liberada), gravados pelo Admin SDK.
+export async function seedConcluded(u) {
+  const keys = [];
+  for (let w = 1; w <= 7; w++) for (let d = 0; d < 3; d++) keys.push([w, d]);
+  keys.push([8, 0], [8, 1], [10, 2], [9, 0], [9, 1], [9, 2]);
+  const base = Date.now() - 60 * 864e5;
+  let i = 0;
+  for (const [w, d] of keys.slice(0, 24)) {
+    i += 1;
+    await db.doc(`posts/${u.uid}_${w}-${d}`).set({
+      uid: u.uid, handle: u.handle, name: u.name, photoURL: '', w, d,
+      at: admin.firestore.Timestamp.fromMillis(base + i * 864e5),
+      comment: '', photoPath: '', imgURL: '', hidden: false, authorActive: true,
+    });
+  }
+}
+
+// ---------- app do aluno ----------
+let hseq = 0;
+export function uniqueHandle() {
+  hseq += 1;
+  return `ale${Date.now().toString(36)}${hseq}`.slice(0, 28);
+}
+
+// Aluno ativo com perfil pronto (handle reservado, boas-vindas vistas).
+export async function makeAthlete(extra = {}) {
+  const handle = extra.handle || uniqueHandle();
+  const u = await makeUser('active', { profiled: true, welcomed: true, handle, ...extra });
+  await db.doc('handles/' + handle).set({ uid: u.uid });
+  return { ...u, handle };
+}
+
+// Abertura da semana 1 em `ms` (padrão: 2 dias atrás, então só a semana 1 está aberta).
+export async function setStart(ms = Date.now() - 2 * 864e5) {
+  await db.doc('config/app').set({ start: admin.firestore.Timestamp.fromMillis(ms), salesOpen: true });
+}
+
+export async function resetStart() {
+  await db.doc('config/app').set({
+    start: admin.firestore.Timestamp.fromDate(new Date('2026-11-08T18:00:00-03:00')), salesOpen: true,
+  });
+}
+
+export async function waitUntil(fn, ms = 20000) {
+  const t0 = Date.now();
+  for (;;) {
+    const v = await fn();
+    if (v) return v;
+    if (Date.now() - t0 > ms) throw new Error('waitUntil: tempo esgotado');
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
+// Metadados de um objeto do Storage (emulador, como dono do bucket).
+export async function storageObject(path, bucket = 'demo-letz.appspot.com') {
+  const res = await fetch(`http://127.0.0.1:9199/v0/b/${bucket}/o/${encodeURIComponent(path)}`, {
+    headers: { authorization: 'Bearer owner' },
+  });
+  return res.ok ? res.json() : null;
+}
