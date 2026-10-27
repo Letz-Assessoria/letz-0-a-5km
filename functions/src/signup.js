@@ -57,7 +57,14 @@ async function fault(db, name, flag) {
   return (await faultValue(db, name, flag)) === true;
 }
 
-const cpfHash = (cpf) => crypto.createHash('sha256').update(String(cpf)).digest('hex');
+// Texto de erro para log sem CPF nem IP (mensagens do Firestore podem trazer o
+// caminho cpfs/{cpf}). CPF em nenhuma forma (nem hash) vai para o log; os uids bastam.
+function safeErr(err) {
+  return String(err)
+    .replace(/\d{3}\.?\d{3}\.?\d{3}-?\d{2}/g, '[cpf]')
+    .replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, '[ip]')
+    .replace(/\b[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7}\b/gi, '[ip]');
+}
 
 // Conta que perdeu o CPF (ou está perdendo) não paga nem abre checkout.
 const cpfGone = (billing) => !!(billing && (billing.cpfReleased || billing.cpfReclaimPendingBy));
@@ -128,13 +135,13 @@ async function cancelCheckoutQuietly(db, checkoutId, why) {
   try {
     await asaasClient().cancelCheckout(checkoutId);
   } catch (err) {
-    logger.warn(`${why}: não cancelou o checkout no Asaas`, { checkoutId, err: String(err) });
+    logger.warn(`${why}: não cancelou o checkout no Asaas`, { checkoutId, err: safeErr(err) });
   }
   const ref = db.doc('checkouts/' + checkoutId);
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (snap.exists && snap.get('status') === 'active') tx.update(ref, { status: 'canceled' });
-  }).catch((err) => logger.warn(`${why}: não marcou o checkout como cancelado`, { checkoutId, err: String(err) }));
+  }).catch((err) => logger.warn(`${why}: não marcou o checkout como cancelado`, { checkoutId, err: safeErr(err) }));
 }
 
 // Reserva cpfs/{cpf} para uid. Falha com already-exists se o CPF tem dono que não pode perdê-lo.
@@ -208,7 +215,7 @@ async function finishReclaim(db, cpf, uid, { prev, kind }) {
   }
   if (lastErr) {
     logger.error('signup: não marcou cpfReleased na conta antiga; cpfReclaimPendingBy fica', {
-      from: prev, to: uid, cpfSha256: cpfHash(cpf), err: String(lastErr),
+      from: prev, to: uid, err: safeErr(lastErr),
     });
     return;
   }
@@ -230,12 +237,12 @@ async function releaseCpf(db, cpf, uid, prev = null, prevAt = null) {
     if (prevBilling && prevBilling.exists && prevBilling.get('cpfReclaimPendingBy') === uid) {
       tx.update(prevBillingRef, { cpfReclaimPendingBy: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() });
     }
-  }).catch((err) => logger.error('signup: não liberou o CPF reservado', { uid, prev, err: String(err) }));
+  }).catch((err) => logger.error('signup: não liberou o CPF reservado', { uid, prev, err: safeErr(err) }));
 }
 
 async function deleteAuthUser(uid) {
   await getAuth().deleteUser(uid).catch((err) => {
-    if (!err || err.code !== 'auth/user-not-found') logger.error('signup: não removeu o usuário do Auth', { uid, err: String(err) });
+    if (!err || err.code !== 'auth/user-not-found') logger.error('signup: não removeu o usuário do Auth', { uid, err: safeErr(err) });
   });
 }
 
@@ -249,7 +256,7 @@ async function cleanupAmbiguousCreate(db, uid, email) {
     if (!doc.exists) await deleteAuthUser(uid);
   } catch (err) {
     if (!err || err.code !== 'auth/user-not-found') {
-      logger.error('signup: não conferiu a conta após erro do createUser', { uid, err: String(err) });
+      logger.error('signup: não conferiu a conta após erro do createUser', { uid, err: safeErr(err) });
     }
   }
 }
@@ -278,7 +285,7 @@ async function openCheckout(db, uid) {
     try {
       await asaasClient().cancelCheckout(checkout.id);
     } catch (err) {
-      logger.error('openCheckout: não cancelou o checkout aberto em corrida com o pagamento', { uid, checkoutId: checkout.id, err: String(err) });
+      logger.error('openCheckout: não cancelou o checkout aberto em corrida com o pagamento', { uid, checkoutId: checkout.id, err: safeErr(err) });
     }
     throw new HttpsError('failed-precondition', saved === 'closed' ? MSG_CLOSED : MSG_PAID);
   }
@@ -302,7 +309,7 @@ async function signup(request) {
   } catch (err) {
     if (err instanceof HttpsError) throw err;
     if (!err || err.code !== 'auth/user-not-found') {
-      logger.error('signup: getUserByEmail falhou', { err: String(err) });
+      logger.error('signup: getUserByEmail falhou', { err: safeErr(err) });
       throw new HttpsError('internal', 'Não foi possível criar a conta. Tente de novo.');
     }
   }
@@ -326,7 +333,7 @@ async function signup(request) {
       await undoCpf();
       throw bad(code === 'auth/invalid-email' ? 'Informe um e-mail válido.' : 'A senha precisa ter pelo menos 6 caracteres.');
     }
-    logger.error('signup: createUser falhou', { uid, code, err: String(err) });
+    logger.error('signup: createUser falhou', { uid, code, err: safeErr(err) });
     await cleanupAmbiguousCreate(db, uid, email);
     await undoCpf();
     throw new HttpsError('internal', 'Não foi possível criar a conta. Tente de novo.');
@@ -346,7 +353,7 @@ async function signup(request) {
     if (await fault(db, 'signup', 'failBatch')) throw new Error('falha simulada no batch');
     await batch.commit();
   } catch (err) {
-    logger.error('signup: não gravou a conta; desfazendo', { uid, err: String(err) });
+    logger.error('signup: não gravou a conta; desfazendo', { uid, err: safeErr(err) });
     await deleteAuthUser(uid);
     await undoCpf();
     throw new HttpsError('internal', 'Não foi possível criar a conta. Tente de novo.');
@@ -359,7 +366,7 @@ async function signup(request) {
   } catch (err) {
     if (err instanceof HttpsError) throw err;
     // A conta e o CPF ficam com este uid; o aluno entra e usa resumeCheckout.
-    logger.error('signup: Asaas falhou ao criar o checkout', { uid, status: err && err.status, err: String(err) });
+    logger.error('signup: Asaas falhou ao criar o checkout', { uid, status: err && err.status, err: safeErr(err) });
     throw new HttpsError('unavailable', MSG_UNAVAILABLE);
   }
 }
@@ -389,7 +396,7 @@ async function resumeCheckout(request) {
     return { checkoutUrl: await openCheckout(db, uid) };
   } catch (err) {
     if (err instanceof HttpsError) throw err;
-    logger.error('resumeCheckout: Asaas falhou ao criar o checkout', { uid, status: err && err.status, err: String(err) });
+    logger.error('resumeCheckout: Asaas falhou ao criar o checkout', { uid, status: err && err.status, err: safeErr(err) });
     throw new HttpsError('unavailable', 'Não conseguimos abrir o pagamento agora. Tente de novo em instantes.');
   }
 }
