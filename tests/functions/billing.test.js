@@ -14,6 +14,7 @@ const admin = require('firebase-admin');
 const PROJECT = 'demo-letz';
 const FN = `http://127.0.0.1:5001/${PROJECT}/southamerica-east1`;
 const AUTH = 'http://127.0.0.1:9099';
+const MSG_EXISTS = 'Já existe um cadastro com este CPF ou e-mail. Entre com seu e-mail e senha ou fale com a Letz.';
 const events = JSON.parse(readFileSync(new URL('./fixtures/asaas-events.json', import.meta.url), 'utf8'));
 
 // Token do webhook: o mesmo valor falso que o emulador lê de functions/.secret.local.
@@ -112,7 +113,7 @@ function payment(fixture, checkoutId, { id, paymentId, n, event } = {}) {
 }
 
 async function wipe() {
-  for (const c of ['users', 'cpfs', 'checkouts', 'asaasEvents', 'config']) {
+  for (const c of ['users', 'cpfs', 'checkouts', 'asaasEvents', 'config', 'rateLimits', 'testFaults']) {
     await db.recursiveDelete(db.collection(c));
   }
   await fetch(`${AUTH}/emulator/v1/projects/${PROJECT}/accounts`, { method: 'DELETE' });
@@ -181,7 +182,7 @@ describe('cadastro, retomada e webhook', () => {
     const { p } = await signupOk();
     const r = await call('signup', person({ cpf: p.cpf }));
     assert.equal(r.error.status, 'ALREADY_EXISTS');
-    assert.equal(r.error.message, 'Este CPF já tem cadastro. Entre com seu e-mail e senha.');
+    assert.equal(r.error.message, MSG_EXISTS);
   });
 
   it('signup: e-mail repetido → already-exists', async () => {
@@ -189,9 +190,83 @@ describe('cadastro, retomada e webhook', () => {
     const other = person({ email: p.email });
     const r = await call('signup', other);
     assert.equal(r.error.status, 'ALREADY_EXISTS');
-    assert.equal(r.error.message, 'Este e-mail já tem cadastro. Entre com seu e-mail e senha.');
+    assert.equal(r.error.message, MSG_EXISTS);
     // O CPF da segunda tentativa não fica preso.
     assert.equal((await db.doc('cpfs/' + other.cpf).get()).exists, false);
+  });
+
+  it('signup: mesma mensagem para CPF e e-mail repetidos', async () => {
+    const { p } = await signupOk();
+    const byCpf = await call('signup', person({ cpf: p.cpf }));
+    const byEmail = await call('signup', person({ email: p.email }));
+    assert.equal(byCpf.error.status, 'ALREADY_EXISTS');
+    assert.equal(byEmail.error.status, 'ALREADY_EXISTS');
+    assert.equal(byCpf.error.message, MSG_EXISTS);
+    assert.equal(byEmail.error.message, byCpf.error.message);
+  });
+
+  it('signup: falha no batch remove usuário do Auth e libera CPF', async () => {
+    // Falha injetada só no emulador (FUNCTIONS_EMULATOR) por testFaults/signup.
+    await db.doc('testFaults/signup').set({ failBatch: true });
+    const p = person();
+    const r = await call('signup', p);
+    assert.equal(r.error.status, 'INTERNAL');
+    await assert.rejects(admin.auth().getUserByEmail(p.email));
+    assert.equal((await db.doc('cpfs/' + p.cpf).get()).exists, false);
+    assert.equal((await db.collection('users').get()).size, 0);
+    await db.doc('testFaults/signup').delete();
+    // O mesmo CPF e e-mail podem tentar de novo.
+    await signupOk(p);
+  });
+
+  it('signup: CPF de conta pendente há mais de 24h pode ser usado', async () => {
+    const old = await signupOk();
+    await db.doc('users/' + old.uid).update({
+      createdAt: admin.firestore.Timestamp.fromMillis(Date.now() - 25 * 3600e3),
+    });
+    const fresh = await signupOk(person({ cpf: old.p.cpf }));
+    assert.equal((await get('cpfs/' + old.p.cpf)).uid, fresh.uid);
+    const oldBilling = await get(`users/${old.uid}/private/billing`);
+    assert.equal(oldBilling.cpfReleased, true);
+    assert.equal(oldBilling.status, 'pending');
+    assert.equal((await get('users/' + old.uid)).access, 'pending');
+    assert.equal((await get('checkouts/' + old.checkoutId)).status, 'canceled');
+    const sent = await (await fetch(`${fake.url}/__checkouts`)).json();
+    assert.equal(sent.find((c) => c.id === old.checkoutId).status, 'CANCELED');
+    // A conta antiga não abre outro checkout.
+    const token = await signIn(old.p.email, old.p.password);
+    assert.equal((await call('resumeCheckout', {}, token)).error.status, 'FAILED_PRECONDITION');
+  });
+
+  it('signup: CPF de pendente recente não é liberado', async () => {
+    const old = await signupOk();
+    const r = await call('signup', person({ cpf: old.p.cpf }));
+    assert.equal(r.error.status, 'ALREADY_EXISTS');
+    assert.equal((await get('cpfs/' + old.p.cpf)).uid, old.uid);
+  });
+
+  it('signup: CPF de conta paga nunca é liberado', async () => {
+    const old = await signupOk();
+    assert.equal((await hook(checkoutPaid(old.uid, old.checkoutId))).status, 200);
+    await db.doc('users/' + old.uid).update({
+      createdAt: admin.firestore.Timestamp.fromMillis(Date.now() - 30 * 24 * 3600e3),
+    });
+    const r = await call('signup', person({ cpf: old.p.cpf }));
+    assert.equal(r.error.status, 'ALREADY_EXISTS');
+    assert.equal((await get('cpfs/' + old.p.cpf)).uid, old.uid);
+    assert.equal((await get(`users/${old.uid}/private/billing`)).cpfReleased, undefined);
+  });
+
+  it('signup: 6ª tentativa do mesmo IP em 1h é bloqueada', async () => {
+    for (let i = 0; i < 5; i++) {
+      const r = await call('signup', person());
+      assert.equal(r.error, undefined, JSON.stringify(r.error));
+    }
+    const p = person();
+    const r = await call('signup', p);
+    assert.equal(r.error.status, 'RESOURCE_EXHAUSTED');
+    assert.equal(r.error.message, 'Muitas tentativas. Tente de novo em alguns minutos.');
+    await assert.rejects(admin.auth().getUserByEmail(p.email));
   });
 
   it('signup: CPF inválido → invalid-argument', async () => {
@@ -256,6 +331,32 @@ describe('cadastro, retomada e webhook', () => {
     const sent = await (await fetch(`${fake.url}/__checkouts`)).json();
     assert.equal(sent.find((c) => c.id === checkoutId).status, 'CANCELED');
     assert.equal(sent.find((c) => c.id === billing.checkoutId).status, 'ACTIVE');
+  });
+
+  it('resumeCheckout: corrida com pagamento não sobrescreve checkout pago', async () => {
+    const { p, uid, url, checkoutId } = await signupOk();
+    await db.doc(`users/${uid}/private/billing`).update({
+      expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() - 60000),
+    });
+    const token = await signIn(p.email, p.password);
+    // O Asaas demora a criar o novo checkout; nesse meio tempo chega o pagamento do antigo.
+    await fetch(`${fake.url}/__delay`, { method: 'POST', body: JSON.stringify({ checkouts: 4000 }) });
+    const pending = call('resumeCheckout', {}, token);
+    await new Promise((r) => setTimeout(r, 1500));
+    assert.equal((await hook(checkoutPaid(uid, checkoutId))).status, 200);
+    const r = await pending;
+    assert.equal(r.error && r.error.status, 'FAILED_PRECONDITION');
+
+    const billing = await get(`users/${uid}/private/billing`);
+    assert.equal(billing.status, 'paid');
+    assert.equal(billing.checkoutId, checkoutId);
+    assert.equal(billing.url, url);
+    assert.equal((await get('users/' + uid)).access, 'active');
+    const sent = await (await fetch(`${fake.url}/__checkouts`)).json();
+    assert.equal(sent.length, 2);
+    const fresh = sent.find((c) => c.id !== checkoutId);
+    assert.equal(fresh.status, 'CANCELED');
+    assert.equal((await get('checkouts/' + fresh.id)).status, 'canceled');
   });
 
   it('resumeCheckout: sem login → unauthenticated', async () => {
@@ -368,6 +469,27 @@ describe('cadastro, retomada e webhook', () => {
     assert.equal((await hook(checkoutPaid(uid, checkoutId))).status, 200);
     assert.equal((await get('users/' + uid)).access, 'blocked');
     assert.equal((await get(`users/${uid}/private/billing`)).status, 'refunded');
+  });
+
+  it('webhook: pago atrasado com billing reembolsado não reativa', async () => {
+    const { uid, checkoutId } = await signupOk();
+    await hook(checkoutPaid(uid, checkoutId));
+    await hook(payment('cardRefunded', checkoutId));
+    assert.equal((await get('users/' + uid)).access, 'blocked');
+    // Sem checkouts/{id} (ou com status perdido), vale o billing.
+    await db.doc('checkouts/' + checkoutId).delete();
+    assert.equal((await hook(checkoutPaid(uid, checkoutId))).status, 200);
+    assert.equal((await get('users/' + uid)).access, 'blocked');
+    assert.equal((await get(`users/${uid}/private/billing`)).status, 'refunded');
+  });
+
+  it('webhook: uid do evento diferente do checkout vale o do checkout', async () => {
+    const a = await signupOk();
+    const b = await signupOk();
+    assert.equal((await hook(checkoutPaid(b.uid, a.checkoutId))).status, 200);
+    assert.equal((await get('users/' + a.uid)).access, 'active');
+    assert.equal((await get('users/' + b.uid)).access, 'pending');
+    assert.equal((await get('asaasEvents/' + (await db.collection('asaasEvents').get()).docs[0].id)).uid, a.uid);
   });
 
   it('webhook: pagamento de segundo checkout marca duplicate', async () => {

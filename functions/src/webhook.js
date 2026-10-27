@@ -19,6 +19,7 @@ function tokenOk(given, expected) {
 function applyPaid(tx, refs, ev, { billing, checkout }) {
   const now = FieldValue.serverTimestamp();
   if (checkout && CLOSED.has(checkout.status)) return 'pago atrasado de checkout já ' + checkout.status;
+  if (CLOSED.has(billing.status) && billing.checkoutId === ev.checkoutId) return 'pago atrasado: billing já ' + billing.status;
 
   if (billing.status === 'paid' && billing.checkoutId !== ev.checkoutId) {
     if (refs.checkout && checkout) tx.update(refs.checkout, { status: 'paid' });
@@ -61,7 +62,13 @@ async function processEvent(db, body) {
     const coRef = ev.checkoutId ? db.doc('checkouts/' + ev.checkoutId) : null;
     const coSnap = coRef ? await tx.get(coRef) : null;
     const checkout = coSnap && coSnap.exists ? coSnap.data() : null;
-    const uid = ev.uid || (checkout && checkout.uid) || null;
+    // checkouts/{id} foi gravado por nós; vale mais que o externalReference do evento.
+    let uid = ev.uid || (checkout && checkout.uid) || null;
+    let mismatch = null;
+    if (ev.uid && checkout && checkout.uid && checkout.uid !== ev.uid) {
+      mismatch = { eventUid: ev.uid, checkoutUid: checkout.uid };
+      uid = checkout.uid;
+    }
 
     // Todas as leituras antes da primeira escrita (regra das transações).
     const refs = uid && ev.kind !== 'ignore' ? {
@@ -80,11 +87,11 @@ async function processEvent(db, body) {
     });
     if (ev.kind === 'ignore') return { result: 'ignorado' };
     if (!uid) return { error: 'uid desconhecido', ev };
-    if (!userSnap.exists || !billingSnap.exists) return { error: 'uid sem conta ou billing', ev, uid };
+    if (!userSnap.exists || !billingSnap.exists) return { error: 'uid sem conta ou billing', ev, uid, mismatch };
 
     const state = { billing: billingSnap.data(), checkout };
     const result = ev.kind === 'paid' ? applyPaid(tx, refs, ev, state) : applyClosed(tx, refs, ev, state);
-    return { result, uid };
+    return { result, uid, mismatch };
   });
 }
 
@@ -105,6 +112,11 @@ async function asaasWebhook(req, res) {
 
   try {
     const out = await processEvent(getFirestore(), body);
+    if (out.mismatch) {
+      logger.error('asaasWebhook: uid do evento difere do dono do checkout; vale o checkout', {
+        eventId: body.id, ...out.mismatch,
+      });
+    }
     if (out.error) {
       logger.error('asaasWebhook: ' + out.error, {
         eventId: body.id, event: body.event, uid: out.uid || null, checkoutId: out.ev.checkoutId, paymentId: out.ev.paymentId,

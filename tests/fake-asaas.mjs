@@ -12,8 +12,9 @@
 //   POST /__emit   {target, token, body} → envia body por POST ao target com o cabeçalho
 //                  asaas-access-token: token; responde {status, text} do alvo.
 //   POST /__fail   {checkouts: true|false} → liga/desliga o 500 em POST /v3/checkouts.
+//   POST /__delay  {checkouts: ms} → atrasa POST /v3/checkouts (para testar corridas).
 //   GET  /__checkouts → lista de checkouts criados (com externalReference e status).
-//   POST /__reset  → limpa checkouts e desliga o modo falha.
+//   POST /__reset  → limpa checkouts e desliga o modo falha e o atraso.
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
@@ -41,7 +42,7 @@ function parse(text) {
 }
 
 export function startFakeAsaas({ port = Number(process.env.FAKE_ASAAS_PORT) || 7777, host = '127.0.0.1' } = {}) {
-  const state = { checkouts: new Map(), failCheckouts: false };
+  const state = { checkouts: new Map(), failCheckouts: false, delayCheckouts: 0 };
   let origin = '';
 
   const server = http.createServer(async (req, res) => {
@@ -68,12 +69,18 @@ export function startFakeAsaas({ port = Number(process.env.FAKE_ASAAS_PORT) || 7
         state.failCheckouts = Boolean(b.checkouts);
         return send(res, 200, { failCheckouts: state.failCheckouts });
       }
+      if (p === '/__delay' && req.method === 'POST') {
+        const b = parse(text) || {};
+        state.delayCheckouts = Math.max(0, Number(b.checkouts) || 0);
+        return send(res, 200, { delayCheckouts: state.delayCheckouts });
+      }
       if (p === '/__checkouts' && req.method === 'GET') {
         return send(res, 200, [...state.checkouts.values()]);
       }
       if (p === '/__reset' && req.method === 'POST') {
         state.checkouts.clear();
         state.failCheckouts = false;
+        state.delayCheckouts = 0;
         return send(res, 200, { ok: true });
       }
 
@@ -83,6 +90,7 @@ export function startFakeAsaas({ port = Number(process.env.FAKE_ASAAS_PORT) || 7
           return send(res, 401, { errors: [{ code: 'invalid_access_token', description: 'Chave ausente.' }] });
         }
         if (p === '/v3/checkouts' && req.method === 'POST') {
+          if (state.delayCheckouts) await new Promise((r) => setTimeout(r, state.delayCheckouts));
           if (state.failCheckouts) {
             return send(res, 500, { errors: [{ code: 'internal_error', description: 'Falha simulada do Asaas.' }] });
           }
