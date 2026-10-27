@@ -11,7 +11,7 @@ A Letz decidiu usar **só o Asaas** para receber, sem Kiwify. A venda tem que fu
 - **Cadastro** (`#/cadastro`, aberto pelos "Quero participar" da landing) com nome, e-mail, **CPF** (com validação dos dígitos), **celular**, senha, confirmação de senha e aceite da política de privacidade.
 - O cadastro cria a conta no Firebase Auth com acesso **pendente** (modelo da parte 1) e faz login.
 - O servidor cria o cliente e a cobrança no Asaas e manda a pessoa para a **página de pagamento do Asaas**.
-- **Preço:** R$ 159,00 à vista no **Pix** ou no **cartão**, ou em **até 12x no cartão com os juros pagos pelo aluno**.
+- **Preço:** R$ 159,00 à vista no **Pix** ou no **cartão**, ou em **até 12x sem juros no cartão** (12x de R$ 13,25), com a taxa do cartão absorvida pela Letz. *Decisão do dono em 27/10: 100% por API, sem configuração manual no painel do Asaas. O repasse de taxas só existe em link criado no painel; se os donos do produto pedirem repasse, volta-se à opção de link fixo registrada em `docs/asaas-notas.md`.*
 - O Asaas avisa o servidor (webhook) e o servidor marca a conta como **ativa**. Esse é o único caminho automático para liberar acesso. A liberação manual pelo painel continua existindo para exceções.
 - **Volta para o app:** depois do pagamento, o Asaas devolve a pessoa ao app (URL de retorno). Ela já está logada desde o cadastro. Se a confirmação ainda não chegou, aparece "Confirmando seu pagamento…", e a tela muda sozinha (listener no documento do usuário) quando a conta ficar ativa.
 - **Pagamento abandonado:** quem está pendente e entra depois vê "Concluir pagamento". O botão reabre a cobrança existente, se ainda for válida, ou cria outra. Não precisa se cadastrar de novo nem gerar cobrança duplicada para quem já pagou.
@@ -45,7 +45,7 @@ A Letz decidiu usar **só o Asaas** para receber, sem Kiwify. A venda tem que fu
 ## Decisões do dono
 
 - Asaas para tudo. O CPF e o celular são pedidos no **nosso** cadastro.
-- R$ 159,00 à vista, ou até 12x com os juros pagos pelo aluno.
+- R$ 159,00 à vista, ou até 12x **sem juros** (taxa absorvida pela Letz), tudo por API (Asaas Checkout).
 - A conta da Letz no Asaas já existe e há acesso ao sandbox.
 - Partes 1 e 2 sobem juntas.
 - **Sem limite de vagas.**

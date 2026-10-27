@@ -40,7 +40,7 @@ Leia os dois antes de começar. O plano argumenta a partir deles.
 - Data padrão da turma: `2026-11-08T18:00:00-03:00`. Semana = 7 dias. Treinos `w` de 1 a 10 e `d` de 0 a 2 (terça, quinta, sábado).
 - Pontos: 3 por treino, no máximo 3 treinos pontuando por semana da turma, contados por ordem de horário de marcação. É a regra atual de `pointedSet`.
 - Medalha liberada: marcou o treino `10-2` e tem pelo menos 24 treinos. É a regra atual de `concluded`.
-- Preço: R$ 159,00 à vista (Pix ou cartão), ou até 12x no cartão com os juros pagos pelo aluno.
+- Preço: R$ 159,00 à vista (Pix ou cartão), ou até 12x **sem juros** no cartão (12x de R$ 13,25) via Asaas Checkout (`POST /checkouts`), 100% por API. Ver `docs/asaas-notas.md`.
 - Textos em português do Brasil, com acentos. Nenhum "Kiwify", "versão de teste" ou "simular" visível no app ao fim do plano.
 - O estilo do código segue o `index.html`: strings de template, `render()`, `data-act`, `V` para estado de tela.
 
