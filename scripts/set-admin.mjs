@@ -28,6 +28,7 @@ const auth = getAuth(initializeApp({ projectId }));
 
 try {
   let user;
+  let created = false;
   try {
     user = await auth.getUserByEmail(values.email);
   } catch (e) {
@@ -36,8 +37,22 @@ try {
       email: values.email,
       password: randomBytes(24).toString('base64url'),
     });
+    created = true;
     const link = await auth.generatePasswordResetLink(values.email);
     console.log(`Usuário criado: uid=${user.uid}`);
+    console.log(`Link de redefinição de senha (envie ao treinador): ${link}`);
+  }
+
+  if (!created && !values.remove && user.emailVerified !== true) {
+    // Anti pre-hijacking: conta existente com e-mail não verificado pode ter sido
+    // criada por terceiros. Retoma a conta antes de conceder admin.
+    await auth.updateUser(user.uid, {
+      password: randomBytes(24).toString('base64url'),
+      disabled: false,
+    });
+    await auth.revokeRefreshTokens(user.uid);
+    const link = await auth.generatePasswordResetLink(values.email);
+    console.log(`Conta existente com e-mail não verificado: senha redefinida e sessões revogadas (uid=${user.uid}).`);
     console.log(`Link de redefinição de senha (envie ao treinador): ${link}`);
   }
 
@@ -46,6 +61,10 @@ try {
   else claims.admin = true;
   await auth.setCustomUserClaims(user.uid, Object.keys(claims).length ? claims : null);
 
+  if (values.remove) {
+    await auth.revokeRefreshTokens(user.uid);
+    console.log('Aviso: ID tokens já emitidos continuam válidos por até ~1h.');
+  }
   console.log(`${values.remove ? 'admin removido' : 'admin definido'}: uid=${user.uid} (${values.email}) projeto=${projectId}`);
 } catch (e) {
   console.error(`Erro: ${e.code || e.message}`);
