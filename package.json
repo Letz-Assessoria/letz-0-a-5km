@@ -7,10 +7,12 @@
     "test:rules": "firebase emulators:exec --only firestore,storage --project demo-letz \"node --test --test-concurrency=1 \\\"tests/rules/*.test.js\\\"\"",
     "test:functions": "mkdir -p functions/shared && cp public/lib/core.js functions/shared/core.js && firebase emulators:exec --only firestore,functions --project demo-letz \"node --test --test-concurrency=1 \\\"tests/functions/*.test.js\\\"\"",
     "test:e2e": "echo 'test:e2e: preenchido em task posterior' && exit 0",
-    "emulators": "firebase emulators:start"
+    "emulators": "firebase emulators:start",
+    "test:admin": "firebase emulators:exec --only auth --project demo-letz \"node --test --test-concurrency=1 \\\"tests/admin/*.test.js\\\"\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.2",
-    "firebase": "^12.19.0"
+    "firebase": "^12.19.0",
+    "firebase-admin": "^13.10.0"
   }
 }
