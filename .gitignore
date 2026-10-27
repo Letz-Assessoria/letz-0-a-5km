@@ -7,3 +7,4 @@ functions/shared/
 test-results/
 .superpowers/
 functions/.secret.local
+playwright-report/
