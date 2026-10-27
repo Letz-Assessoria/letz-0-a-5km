@@ -3191,6 +3191,8 @@ function vShip(){if(!V.shipOpen)return '';if(V.shipStep==='pay')return vPay();va
  f('tel','Celular para contato da entrega','type="tel" inputmode="tel" autocomplete="tel" maxlength="20"',true)+
  (V.shipErr?'<p class="err" role="alert">'+V.shipErr+'</p>':'')+
  '<button class="btn go wide" type="submit">Confirmar endereço '+ic('check')+'</button><button class="linkbtn" type="button" data-act="ship-close">Preencher depois</button></form></div></div>';}
+function fmtCpf(v){v=v.replace(/\D/g,'').slice(0,11);return v.length>9?v.slice(0,3)+'.'+v.slice(3,6)+'.'+v.slice(6,9)+'-'+v.slice(9):v.length>6?v.slice(0,3)+'.'+v.slice(3,6)+'.'+v.slice(6):v.length>3?v.slice(0,3)+'.'+v.slice(3):v;}
+function fmtPhone(v){v=v.replace(/\D/g,'').slice(0,11);if(v.length<3)return v.length?'('+v:v;var d='('+v.slice(0,2)+') ',r=v.slice(2);return d+(r.length>(v.length===11?5:4)?r.slice(0,v.length===11?5:4)+'-'+r.slice(v.length===11?5:4):r);}
 function fmtCep(v){v=v.replace(/\D/g,'').slice(0,8);return v.length>5?v.slice(0,5)+'-'+v.slice(5):v;}
 function lookupCep(c){var msg=document.getElementById('cep-msg');var set=function(t){V.cepMsg=t;if(msg)msg.textContent=t;};set('Buscando o endereço…');
  fetch('https://viacep.com.br/ws/'+c+'/json/').then(function(r){return r.json();}).then(function(j){if(j.erro){set('CEP não encontrado. Confira o número ou preencha o endereço.');return;}
@@ -3302,6 +3304,7 @@ app.addEventListener('submit',function(e){e.preventDefault();
  /* deu certo: onSession leva para a tela do papel */
  LetzFB.login(le,lp).catch(function(er){V.busy=false;V.err=LetzFB.errorMessage(er);render();});});
 app.addEventListener('input',function(e){var id=e.target.id;
+ if(id==='sg-cpf'||id==='sg-phone'||id==='sh-tel'){var mv=id==='sg-cpf'?fmtCpf(e.target.value):fmtPhone(e.target.value);if(mv!==e.target.value)e.target.value=mv;}
  if(id&&id.indexOf('sg-')===0){V.sg[id.slice(3)]=e.target.type==='checkbox'?e.target.checked:e.target.value;}
  if(id&&id.indexOf('sh-')===0){if(id==='sh-cep'){var fv=fmtCep(e.target.value);if(fv!==e.target.value)e.target.value=fv;var c8=fv.replace(/\D/g,'');if(c8.length===8&&c8!==V.lastCep){V.lastCep=c8;lookupCep(c8);}}V.sd[id.slice(3)]=e.target.value;}
  if(id&&id.indexOf('c-')===0){V.ctext[id.slice(2)]=e.target.value;}
