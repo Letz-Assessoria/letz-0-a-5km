@@ -14,6 +14,14 @@ service cloud.firestore {
     }
     function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
     function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function myProfile() { return get(me()).data; }
+    // Se o handle foi criado ou trocado, a reserva handles/{novo} do próprio uid
+    // tem que existir ao fim da mesma transação/batch.
+    function handleReserved() {
+      return !('handle' in changed())
+        || getAfter(/databases/$(database)/documents/handles/$(request.resource.data.handle)).data.uid
+           == request.auth.uid;
+    }
 
     // ---------- users ----------
     match /users/{uid} {
@@ -22,7 +30,8 @@ service cloud.firestore {
       allow create, delete: if false;
       allow update: if
         (isOwner(uid)
-          && changed().hasOnly(['name', 'handle', 'photoURL', 'profiled', 'welcomed']))
+          && changed().hasOnly(['name', 'handle', 'photoURL', 'profiled', 'welcomed'])
+          && handleReserved())
         || (isAdmin()
           && changed().hasOnly(['access', 'points', 'done'])
           && request.resource.data.access in ['pending', 'active', 'blocked']);
@@ -82,10 +91,12 @@ service cloud.firestore {
     match /posts/{postId} {
       function newPostOk() {
         let p = request.resource.data;
-        return p.keys().hasAll(['uid', 'w', 'd', 'at', 'hidden', 'authorActive'])
+        let u = myProfile();
+        return p.keys().hasAll(['uid', 'handle', 'name', 'photoURL', 'w', 'd', 'at', 'hidden', 'authorActive'])
           && p.keys().hasOnly(['uid', 'handle', 'name', 'photoURL', 'w', 'd', 'at',
                                'comment', 'photoPath', 'imgURL', 'hidden', 'authorActive', 'rc'])
           && p.uid == request.auth.uid
+          && p.handle == u.handle && p.name == u.name && p.photoURL == u.photoURL
           && p.w is int && p.w >= 1 && p.w <= 10
           && p.d is int && p.d >= 0 && p.d <= 2
           && postId == request.auth.uid + '_' + string(p.w) + '-' + string(p.d)
@@ -109,6 +120,7 @@ service cloud.firestore {
         allow create: if isActive()
           && request.resource.data.keys().hasOnly(['uid', 'handle', 'text', 'at', 'hidden'])
           && request.resource.data.uid == request.auth.uid
+          && request.resource.data.handle == myProfile().handle
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
           && request.resource.data.text.size() <= 1000

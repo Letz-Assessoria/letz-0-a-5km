@@ -7,7 +7,7 @@ import {
 } from '@firebase/rules-unit-testing';
 import {
   doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, Timestamp,
-  collection, getDocs, setLogLevel,
+  collection, getDocs, setLogLevel, writeBatch,
 } from 'firebase/firestore';
 import { createRequire } from 'node:module';
 
@@ -84,7 +84,7 @@ describe('firestore.rules', () => {
 
   it('users: aluno não altera access, points nem done', async () => {
     const ref = doc(db(ALICE), 'users', ALICE);
-    await assertSucceeds(updateDoc(ref, { name: 'Alice B', handle: 'aliceb', photoURL: 'x', profiled: true, welcomed: true }));
+    await assertSucceeds(updateDoc(ref, { name: 'Alice B', photoURL: 'x', profiled: true, welcomed: true }));
     await assertFails(updateDoc(ref, { access: 'blocked' }));
     await assertFails(updateDoc(ref, { points: 999 }));
     await assertFails(updateDoc(ref, { done: 30 }));
@@ -137,6 +137,28 @@ describe('firestore.rules', () => {
     await assertFails(updateDoc(aref, { rua: 'Outra' }));
   });
 
+  it('users: trocar handle sem reservar handles/ é negado', async () => {
+    await assertFails(updateDoc(doc(db(ALICE), 'users', ALICE), { handle: 'alicenova' }));
+    // reserva de outro uid não serve
+    await seed((f) => setDoc(doc(f, 'handles', 'dobob'), { uid: BOB }));
+    await assertFails(updateDoc(doc(db(ALICE), 'users', ALICE), { handle: 'dobob' }));
+  });
+
+  it('users: trocar handle com reserva na mesma batch é permitido', async () => {
+    const f = db(ALICE);
+    const b = writeBatch(f);
+    b.set(doc(f, 'handles', 'alicenova'), { uid: ALICE });
+    b.update(doc(f, 'users', ALICE), { handle: 'alicenova', name: 'Alice N' });
+    await assertSucceeds(b.commit());
+  });
+
+  it('handles: não apaga handle de outro', async () => {
+    await seed((f) => setDoc(doc(f, 'handles', 'bob'), { uid: BOB }));
+    await assertFails(deleteDoc(doc(db(ALICE), 'handles', 'bob')));
+    await assertFails(deleteDoc(doc(adminDb(), 'handles', 'bob')));
+    await assertSucceeds(deleteDoc(doc(db(BOB), 'handles', 'bob')));
+  });
+
   it('handles: cria só com uid próprio e só se não existir', async () => {
     await assertSucceeds(setDoc(doc(db(ALICE), 'handles', 'alice'), { uid: ALICE }));
     await assertFails(setDoc(doc(db(BOB), 'handles', 'bobby'), { uid: ALICE }));
@@ -171,6 +193,15 @@ describe('firestore.rules', () => {
     // start no futuro: até w=1 está trancada
     await seedConfig(Date.now() + DAY);
     await assertFails(setDoc(doc(db(ALICE), 'posts', `${ALICE}_1-0`), newPost(ALICE, 1, 0)));
+  });
+
+  it('posts: rejeita handle diferente do perfil', async () => {
+    const a = db(ALICE);
+    await assertFails(setDoc(doc(a, 'posts', `${ALICE}_1-0`), newPost(ALICE, 1, 0, { handle: 'bob' })));
+    await assertFails(setDoc(doc(a, 'posts', `${ALICE}_1-0`), newPost(ALICE, 1, 0, { name: 'Outro Nome' })));
+    await assertFails(setDoc(doc(a, 'posts', `${ALICE}_1-0`), newPost(ALICE, 1, 0, { photoURL: 'https://falsa' })));
+    const { handle, ...semHandle } = newPost(ALICE, 1, 0);
+    await assertFails(setDoc(doc(a, 'posts', `${ALICE}_1-0`), semHandle));
   });
 
   it('posts: pendente não cria', async () => {
@@ -225,6 +256,13 @@ describe('firestore.rules', () => {
     await assertSucceeds(updateDoc(doc(adminDb(), path), { hidden: true }));
     await assertFails(deleteDoc(doc(db(ALICE), path)));
     await assertSucceeds(deleteDoc(doc(db(BOB), path)));
+  });
+
+  it('comments: rejeita handle diferente do perfil', async () => {
+    const id = await seedPost(ALICE, 1, 0);
+    const c = { uid: BOB, handle: ALICE, text: 'Boa!', at: serverTimestamp(), hidden: false };
+    await assertFails(setDoc(doc(db(BOB), `posts/${id}/comments/c1`), c));
+    await assertSucceeds(setDoc(doc(db(BOB), `posts/${id}/comments/c1`), { ...c, handle: BOB }));
   });
 
   it('reactions: só escreve o doc com o próprio uid', async () => {
