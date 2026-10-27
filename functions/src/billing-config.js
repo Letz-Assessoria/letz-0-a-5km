@@ -1,0 +1,33 @@
+// Parâmetros e secrets do Asaas, compartilhados pelo cadastro e pelo webhook.
+// Valores não secretos: functions/.env.<projeto> (e .env.local nos emuladores).
+// Secrets: Secret Manager (e functions/.secret.local, falso, nos emuladores).
+const { defineSecret, defineString } = require('firebase-functions/params');
+const { createClient } = require('./asaas.js');
+
+const ASAAS_API_KEY = defineSecret('ASAAS_API_KEY');
+const ASAAS_WEBHOOK_TOKEN = defineSecret('ASAAS_WEBHOOK_TOKEN');
+const ASAAS_BASE_URL = defineString('ASAAS_BASE_URL');
+const APP_URL = defineString('APP_URL');
+const PROGRAM_PRICE = defineString('PROGRAM_PRICE');
+const MAX_INSTALLMENTS = defineString('MAX_INSTALLMENTS');
+
+const MINUTES_TO_EXPIRE = 60;
+
+function asaasClient() {
+  return createClient({ baseUrl: ASAAS_BASE_URL.value(), apiKey: ASAAS_API_KEY.value() });
+}
+
+function checkoutArgs(uid) {
+  const app = APP_URL.value().replace(/\/+$/, '');
+  return {
+    uid,
+    value: Number(PROGRAM_PRICE.value()),
+    maxInstallments: Number(MAX_INSTALLMENTS.value()),
+    successUrl: `${app}/#/confirmando`,
+    cancelUrl: `${app}/#/aguardando`,
+    expiredUrl: `${app}/#/aguardando`,
+    minutesToExpire: MINUTES_TO_EXPIRE,
+  };
+}
+
+module.exports = { ASAAS_API_KEY, ASAAS_WEBHOOK_TOKEN, asaasClient, checkoutArgs };

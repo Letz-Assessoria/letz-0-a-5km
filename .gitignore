@@ -6,3 +6,4 @@ functions/shared/
 *.log
 test-results/
 .superpowers/
+functions/.secret.local
