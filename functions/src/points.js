@@ -7,19 +7,20 @@ async function getStartMs(db) {
   return s && typeof s.toMillis === 'function' ? s.toMillis() : new Date(core.DEFAULT_START_ISO).getTime();
 }
 
-// Recalcula points/done de um aluno a partir dos posts. Só grava se mudou.
+// Recalcula points/done de um aluno a partir dos posts, em transação. Só grava se mudou.
 async function recomputeUser(db, uid, startMs) {
   const userRef = db.doc('users/' + uid);
-  const user = await userRef.get();
-  if (!user.exists) return;
-  const posts = await db.collection('posts').where('uid', '==', uid).get();
-  const marks = {};
-  posts.forEach((p) => {
-    const d = p.data();
-    if (d.at && typeof d.at.toMillis === 'function') marks[d.w + '-' + d.d] = d.at.toMillis();
+  await db.runTransaction(async (tx) => {
+    const [user, posts] = await Promise.all([tx.get(userRef), tx.get(db.collection('posts').where('uid', '==', uid))]);
+    if (!user.exists) return;
+    const marks = {};
+    posts.forEach((p) => {
+      const d = p.data();
+      if (d.at && typeof d.at.toMillis === 'function') marks[d.w + '-' + d.d] = d.at.toMillis();
+    });
+    const { points, done } = core.pointsFor(marks, startMs);
+    if (user.get('points') !== points || user.get('done') !== done) tx.update(userRef, { points, done });
   });
-  const { points, done } = core.pointsFor(marks, startMs);
-  if (user.get('points') !== points || user.get('done') !== done) await userRef.update({ points, done });
 }
 
 async function onPostChange(event) {

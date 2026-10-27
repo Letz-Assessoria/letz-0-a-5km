@@ -12,4 +12,4 @@ const reactions = require('./src/reactions.js');
 exports.onPostWritten = onDocumentWritten('posts/{postId}', points.onPostChange);
 exports.onReactionWritten = onDocumentWritten('posts/{postId}/reactions/{uid}', reactions.onReactionChange);
 exports.onUserWritten = onDocumentWritten('users/{uid}', propagate.onUserChange);
-exports.onConfigWritten = onDocumentWritten('config/app', points.onConfigChange);
+exports.onConfigWritten = onDocumentWritten({ document: 'config/app', timeoutSeconds: 300 }, points.onConfigChange);

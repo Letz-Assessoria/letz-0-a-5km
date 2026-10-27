@@ -80,6 +80,15 @@ describe('functions de dados', () => {
     });
   });
 
+  it('reactions: 5 reações simultâneas resultam em rc correto', async () => {
+    await mkUser('ana');
+    await mkPost('ana', 1, 0, START + HOUR);
+    await Promise.all(['a', 'b', 'c', 'd', 'e'].map((u) => db.doc('posts/ana_1-0/reactions/' + u).set({ fire: true })));
+    await waitFor(async () => (await db.doc('posts/ana_1-0').get()).data().rc?.fire === 5);
+    await new Promise((r) => setTimeout(r, 1500));
+    assert.equal((await db.doc('posts/ana_1-0').get()).data().rc.fire, 5);
+  });
+
   it('reactions: reação em post inexistente não quebra nada', async () => {
     await db.doc('posts/fantasma_1-0/reactions/bob').set({ fire: true });
     await new Promise((r) => setTimeout(r, 2000));
@@ -127,7 +136,7 @@ describe('functions de dados', () => {
     await mkPost('ana', 2, 0, START + 7 * 24 * HOUR + HOUR);
     await mkPost('ana', 2, 1, START + 7 * 24 * HOUR + 2 * HOUR);
     await waitFor(userIs('ana', 12, 4));
-    // start 10 dias antes dos posts: todos caem na mesma semana 1 -> só 3 pontuam
+    // start passa a ser 1 ms antes da semana 2: todos os posts caem na semana 0 -> só 3 pontuam
     await db.doc('config/app').update({ start: Timestamp.fromMillis(START + 7 * 24 * HOUR - 1) });
     await waitFor(userIs('ana', 9, 4));
     const pat = (await db.doc('users/pat').get()).data();
