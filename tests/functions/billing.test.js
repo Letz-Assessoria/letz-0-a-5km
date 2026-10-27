@@ -753,6 +753,16 @@ describe('cadastro, retomada e webhook', () => {
     assert.equal(list[0].eventId, e.id);
   });
 
+  it('webhook: reembolso antes do pago fecha o checkout e o pago tardio gera alerta sem ativar', async () => {
+    const { uid, checkoutId } = await signupOk();
+    await hook(payment('cardRefunded', checkoutId));
+    assert.equal((await get('checkouts/' + checkoutId)).status, 'refunded');
+    assert.equal((await get('users/' + uid)).access, 'pending');
+    await hook(payment('cardConfirmed', checkoutId));
+    assert.equal((await get('users/' + uid)).access, 'pending');
+    assert.equal((await alerts()).filter((a) => a.type === 'paid-closed-checkout' && a.uid === uid).length, 1);
+  });
+
   it('webhook: captura recusada do cartão também bloqueia', async () => {
     const { uid, checkoutId } = await signupOk();
     await hook(payment('cardConfirmed', checkoutId));

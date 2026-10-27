@@ -68,9 +68,12 @@ function applyPaid(tx, refs, ev, { billing, checkout }, alert) {
 }
 
 function applyClosed(tx, refs, ev, { billing, checkout }) {
-  // Só o checkout pago e atual fecha; outro (ainda aberto) pode ser pago depois.
-  if (billing.status !== 'paid' || billing.checkoutId !== ev.checkoutId) return 'não é o checkout pago atual';
-  if (refs.checkout && checkout && !CLOSED.has(checkout.status)) tx.update(refs.checkout, { status: ev.kind });
+  const current = billing.status === 'paid' && billing.checkoutId === ev.checkoutId;
+  // Estorno/chargeback sempre fecha o checkout (o dinheiro voltou); um pago tardio dele
+  // cai no alerta paid-closed-checkout. 'rejected' só fecha o checkout pago e atual.
+  const closeCheckout = ev.kind !== 'rejected' || current;
+  if (closeCheckout && refs.checkout && checkout && !CLOSED.has(checkout.status)) tx.update(refs.checkout, { status: ev.kind });
+  if (!current) return 'não é o checkout pago atual';
   tx.update(refs.billing, { status: ev.kind, updatedAt: FieldValue.serverTimestamp() });
   tx.update(refs.user, { access: 'blocked' });
   return 'bloqueado';

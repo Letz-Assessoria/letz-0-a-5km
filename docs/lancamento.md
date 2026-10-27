@@ -215,3 +215,8 @@ Apague os dados de teste depois (usuário no Auth, `users/{uid}`, `cpfs/{cpf}`, 
 - Estorno vencido a favor da Letz (chargeback revertido) e estorno de uma só parcela do cartão não são tratados sozinhos: use "Liberar acesso" no painel, depois de conferir no Asaas.
 - Se aparecer "Pagamento duplicado" ou "CPF em conflito" na linha de um aluno, o aluno pagou duas vezes ou pagou depois de o CPF ter sido liberado para outro cadastro: resolva no Asaas (estorno) e marque o alerta como resolvido.
 - O link do convite do grupo de WhatsApp que existia no código antigo continua no histórico do git: **revogue esse link no WhatsApp** (Info. do grupo, Link de convite, Redefinir link) e cadastre o novo só pelo painel.
+
+## Depois do lançamento
+
+- **Firebase App Check** (reCAPTCHA Enterprise ou v3) com enforcement nas callables `signup` e `resumeCheckout`. É a defesa certa contra cadastro automatizado vindo de muitos IPs.
+- Por que não há limite global que bloqueie: um teto global de tentativas deixaria um atacante com muitos IPs travar todos os compradores. Só o limite por IP (20/h) bloqueia; o contador de cadastros concluídos apenas avisa (alerta `signup-spike` no painel, acima de 300/h), nunca recusa ninguém.
