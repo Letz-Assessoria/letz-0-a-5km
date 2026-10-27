@@ -6,7 +6,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
 import {
   getFirestore, connectFirestoreEmulator, doc, collection, onSnapshot, getDoc, getDocs, setDoc, updateDoc, deleteDoc, addDoc,
-  query, where, orderBy, limit, runTransaction, serverTimestamp,
+  query, where, orderBy, limit, runTransaction, serverTimestamp, Timestamp, deleteField,
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-functions.js';
 import { getStorage, connectStorageEmulator, ref as sref, uploadBytes, getDownloadURL, deleteObject } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-storage.js';
@@ -404,6 +404,88 @@ function watchShip(cb) {
     (err) => { fail(err); cb(null); }));
 }
 
+// ---------- painel do treinador (regras: só com a claim admin) ----------
+// Config: start vira Timestamp; null apaga o campo. merge mantém o resto do config/app.
+function cfgValue(v) {
+  if (v === null) return deleteField();
+  if (Array.isArray(v) || typeof v !== 'object') return v;
+  const o = {};
+  Object.keys(v).forEach((k) => { o[k] = cfgValue(v[k]); });
+  return o;
+}
+async function saveConfig(patch) {
+  const data = {};
+  Object.keys(patch).forEach((k) => {
+    data[k] = k === 'start' && typeof patch[k] === 'number' ? Timestamp.fromMillis(patch[k]) : cfgValue(patch[k]);
+  });
+  await setDoc(doc(db, 'config', 'app'), data, { merge: true });
+}
+
+// Lista ao vivo: users + private/profile, billing e ship de cada aluno (sem CPF).
+function athleteRow(uid, u, p, b, sh) {
+  return {
+    uid, name: u.name || '', handle: u.handle || '', access: u.access || 'pending',
+    points: Number(u.points) || 0, done: Number(u.done) || 0, createdAt: ms(u.createdAt),
+    email: (p && p.email) || '', phone: (p && p.phone) || '',
+    billing: b ? {
+      status: b.status || 'pending', method: b.method || '', installments: Number(b.installments) || 0,
+      paidAt: ms(b.paidAt), duplicate: !!b.duplicate, cpfConflict: !!b.cpfConflict,
+    } : null,
+    ship: sh ? { ...sh, at: ms(sh.at), paidAt: ms(sh.paidAt), paid: ms(sh.paidAt) || 0 } : null,
+  };
+}
+const athletes = new Map();
+let athletesEmit = null;
+async function loadAthlete(uid, u) {
+  const read = async (n) => { try { const s = await getDoc(doc(db, 'users', uid, 'private', n)); return s.exists() ? s.data() : null; } catch { return null; } };
+  const [p, b, sh] = await Promise.all([read('profile'), read('billing'), read('ship')]);
+  athletes.set(uid, athleteRow(uid, u, p, b, sh));
+}
+function emitAthletes() {
+  if (athletesEmit) athletesEmit(Array.from(athletes.values()).sort((a, c) => (c.createdAt || 0) - (a.createdAt || 0)));
+}
+function listAthletes(cb) {
+  athletes.clear();
+  athletesEmit = cb;
+  let alive = true;
+  const off = whenSession((s) => !!(s && s.user && s.claims && s.claims.admin === true), () => onSnapshot(
+    collection(db, 'users'),
+    async (snap) => {
+      const ch = snap.docChanges();
+      ch.filter((c) => c.type === 'removed').forEach((c) => athletes.delete(c.doc.id));
+      await Promise.all(ch.filter((c) => c.type !== 'removed').map((c) => loadAthlete(c.doc.id, c.doc.data())));
+      if (alive) emitAthletes();
+    },
+    (err) => { fail(err); if (alive) cb([]); },
+  ));
+  return () => { alive = false; athletesEmit = null; athletes.clear(); off(); };
+}
+async function refreshAthlete(uid) {
+  const prev = athletes.get(uid);
+  if (!prev) return;
+  const s = await getDoc(doc(db, 'users', uid, 'private', 'ship'));
+  athletes.set(uid, { ...prev, ship: s.exists() ? athleteRow(uid, {}, null, null, s.data()).ship : null });
+  emitAthletes();
+}
+async function setAccess(uid, access) {
+  if (access !== 'active' && access !== 'blocked') throw new Error('acesso inválido');
+  await updateDoc(doc(db, 'users', uid), { access });
+}
+async function setPostHidden(postId, hidden) {
+  await updateDoc(doc(db, 'posts', postId), { hidden: !!hidden });
+}
+async function setCommentHidden(postId, cid, hidden) {
+  await updateDoc(doc(db, 'posts', postId, 'comments', cid), { hidden: !!hidden });
+}
+async function setShipPaid(uid, paid) {
+  await updateDoc(doc(db, 'users', uid, 'private', 'ship'), { paidAt: paid ? serverTimestamp() : deleteField() });
+  await refreshAthlete(uid);
+}
+async function setTrack(uid, code) {
+  await updateDoc(doc(db, 'users', uid, 'private', 'ship'), { track: String(code || '').trim().toUpperCase() });
+  await refreshAthlete(uid);
+}
+
 window.LetzFB = {
   app, auth, db, functions, storage,
   onSession, signup, login, logout, resetPassword, resumeCheckout, errorMessage,
@@ -411,5 +493,6 @@ window.LetzFB = {
   watchMyPosts, watchFeed, loadMoreFeed, watchRanking, watchConfig,
   loadMyReactions, toggleReaction, addComment, deleteComment, watchComments,
   saveShip, watchShip,
+  saveConfig, listAthletes, setAccess, setPostHidden, setCommentHidden, setShipPaid, setTrack,
 };
 document.dispatchEvent(new Event('letzfb-ready'));
