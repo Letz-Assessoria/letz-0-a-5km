@@ -197,3 +197,27 @@ test('ver como atleta não cria perfil nem entra no ranking', async ({ page }) =
   await tab(page, 'Ranking');
   expect((await db.doc('users/' + c.uid).get()).exists).toBe(false);
 });
+
+test('treinador recarregando #/app/treinos não vai para o perfil', async ({ page }) => {
+  await coachPanel(page);
+  await page.getByRole('button', { name: 'Ver como atleta' }).click();
+  await expect(page).toHaveURL(/#\/app\/treinos$/);
+  await page.reload();
+  await expect(page.getByRole('navigation', { name: 'Principal' })).toBeVisible();
+  await expect(page).toHaveURL(/#\/app\/treinos$/);
+  await page.goto('/#/perfil');
+  await page.reload();
+  await expect(page).toHaveURL(/#\/admin\//);
+});
+
+test('treinador abre #/admin/atletas direto', async ({ page }) => {
+  const c = await makeCoach();
+  await page.goto('/#/admin/atletas');
+  await page.getByLabel('E-mail').fill(c.email);
+  await page.getByLabel('Senha', { exact: true }).fill(c.password);
+  await page.getByRole('button', { name: 'Entrar' }).click();
+  await expect(page).toHaveURL(/#\/admin\/atletas$/);
+  await page.reload();
+  await expect(page).toHaveURL(/#\/admin\/atletas$/);
+  await expect(page.getByRole('heading', { name: 'Painel' })).toBeVisible();
+});

@@ -3235,7 +3235,7 @@ function applyPath(hash){var seg=String(hash||'').replace(/^#\/?/,'').split('/')
  /* a guarda espera a primeira sessão: até lá, as telas com login mostram "Carregando…" e o endereço fica */
  if(NEEDS_SESSION.indexOf(view)>-1&&!sessionKnown){V.wait=view==='athlete'?'/app/'+V.tab:view==='admin'?'/admin/'+V.atab:ROUTES[view];view='loading';}
  else if(view==='admin'){if(role!=='admin')view=home();}
- else if(view==='athlete'||view==='profile'||view==='welcome'){if(role!=='athlete'&&role!=='admin')view=home();else if(view!=='profile'&&!S.profiled)view='profile';}
+ else if(view==='athlete'||view==='profile'||view==='welcome'){if(role!=='athlete'&&role!=='admin')view=home();else if(role==='admin'&&(view==='profile'||view==='welcome'))view=home();else if(view!=='profile'&&role!=='admin'&&!S.profiled)view='profile';}
  else if(view==='aguardando'||view==='confirmando'){if(role!=='pending')view=home();}
  else if(view==='bloqueado'){if(role!=='blocked')view=home();}
  else if(view==='login'||view==='cadastro'||view==='esqueci'){if(role)view=home();}
@@ -3267,6 +3267,7 @@ function render(){routeSync();app.className=V.view==='sales'?'wide':'';var v=V.v
   v==='loading'?'<div class="view">'+(V.fbfail&&!window.LetzFB?'<div class="stack" style="align-items:center;padding:48px 0"><p class="err" role="alert">Não conseguimos conectar ao servidor. Confira sua internet.</p><button class="btn go" data-act="reload">Tentar de novo</button></div>':'<p class="muted" role="status" style="text-align:center;padding:48px 0">Carregando…</p>')+'</div>':v==='admin'?vAdmin():vAthlete();}
 
 app.addEventListener('submit',function(e){e.preventDefault();
+ if(role==='admin'&&V.view==='athlete'){V.flash='Pré-visualização: o treinador não registra treinos nem interage.';softRender();return;}
  if(e.target.id==='f-ship'){var d=V.sd,cep=(d.cep||'').replace(/\D/g,'');['nome','rua','num','bairro','cidade'].forEach(function(k){d[k]=(d[k]||'').trim();});
   if(!d.nome||cep.length!==8||!d.rua||!d.num||!d.bairro||!d.cidade||!d.uf){V.shipErr='Preencha nome, CEP, rua, número, bairro, cidade e estado.';}
   else if(!window.LetzFB){V.shipErr='Sem conexão com o servidor. Confira sua internet e tente de novo.';}
