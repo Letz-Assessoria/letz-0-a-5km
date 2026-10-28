@@ -162,7 +162,7 @@ curl -s -X POST https://api.asaas.com/v3/webhooks \
   -H "access_token: $ASAAS_API_KEY" -H 'Content-Type: application/json' \
   -d "{
     \"name\": \"Letz producao\",
-    \"url\": \"https://$REGION-$PROJECT.cloudfunctions.net/asaasWebhook\",
+    \"url\": \"https://asaaswebhook-z4kzkxvf2q-rj.a.run.app\",
     \"email\": \"<email-do-dono>\",
     \"enabled\": true,
     \"interrupted\": false,
@@ -176,7 +176,7 @@ curl -s -X POST https://api.asaas.com/v3/webhooks \
 unset ASAAS_API_KEY WEBHOOK_TOKEN
 ```
 
-(a URL real é a de `firebase functions:list`; ajuste se for outra.) O e-mail de falha do webhook do Asaas cai no `email` informado. Verificar: `GET /v3/webhooks` lista o webhook com `enabled: true`, `sendType: SEQUENTIALLY` e os 8 eventos; sem `PAYMENT_DELETED`.
+(esta é a URL de produção do Cloud Run; confira com `gcloud run services list`.) O e-mail de falha do webhook do Asaas cai no `email` informado. Verificar: `GET /v3/webhooks` lista o webhook com `enabled: true`, `sendType: SEQUENTIALLY` e os 8 eventos; sem `PAYMENT_DELETED`.
 
 ## 12. Alertas
 

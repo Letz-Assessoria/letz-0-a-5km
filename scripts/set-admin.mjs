@@ -24,6 +24,12 @@ if (!values.project || !values.email) {
 }
 
 const projectId = PROJECTS[values.project] || values.project;
+// apiKey web de cada projeto (pública, a mesma de public/js/fb.js); o link do Admin SDK sai com apiKey vazia.
+const WEB_API_KEYS = {
+  'letz-0-aos-5km': 'AIzaSyA6ohoB15NRgaLBFLRy8EacGgAAWXkXtaU',
+  'letz-0-aos-5km-dev': 'AIzaSyCQ_c-OtMyMqMdKRYqt0mKEgA13-RyGPuU',
+};
+const withApiKey = (link) => (WEB_API_KEYS[projectId] ? link.replace(/([?&]apiKey=)(?=&|$)/, `$1${WEB_API_KEYS[projectId]}`) : link);
 process.env.GCLOUD_PROJECT = projectId;
 const auth = getAuth(initializeApp({ projectId }));
 
@@ -39,7 +45,7 @@ try {
       password: randomBytes(24).toString('base64url'),
     });
     created = true;
-    const link = await auth.generatePasswordResetLink(values.email);
+    const link = withApiKey(await auth.generatePasswordResetLink(values.email));
     console.log(`Usuário criado: uid=${user.uid}`);
     console.log(`Link de redefinição de senha (envie ao treinador): ${link}`);
   }
@@ -59,7 +65,7 @@ try {
       password: randomBytes(24).toString('base64url'),
     });
     await auth.revokeRefreshTokens(user.uid);
-    const link = await auth.generatePasswordResetLink(values.email);
+    const link = withApiKey(await auth.generatePasswordResetLink(values.email));
     console.log(`Conta existente com e-mail não verificado: senha redefinida e sessões revogadas (uid=${user.uid}).`);
     console.log(`Link de redefinição de senha (envie ao treinador): ${link}`);
   }
