@@ -1014,6 +1014,8 @@ function todayYmd(){var d=new Date(),z=function(n){return ('0'+n).slice(-2);};re
 function addrFull(a){if(!a)return '';var c=String(a.cep||'').replace(/\D/g,'');return a.street+', '+a.number+(a.complement?' ('+a.complement+')':'')+' - '+a.district+', '+a.city+'/'+a.uf+(c?', CEP '+(c.length===8?c.slice(0,5)+'-'+c.slice(5):c):'');}
 function medalActions(x){var u=esc(x.uid),f=V.mform&&V.mform.uid===x.uid?V.mform:null,busy=!!V.mbusy[x.uid],dis=busy?' disabled':'',b=function(act,label,cls,extra){return '<button class="btn '+(cls||'line')+' sm" data-act="'+act+'" data-uid="'+u+'"'+(extra||'')+dis+'>'+label+'</button>';};
  if(f){return '<div class="stack" style="gap:8px;min-width:220px"><div class="field"><label for="mf-trk">Código de rastreio</label><input id="mf-trk" type="text" autocomplete="off" maxlength="40" value="'+esc(f.trk)+'"></div><div class="field"><label for="mf-date">Data de envio</label><input id="mf-date" type="date" value="'+esc(f.date)+'"></div><div class="row" style="gap:8px">'+b('m-ship-ok','Confirmar envio','go')+b('m-ship-cancel','Cancelar')+'</div></div>';}
+ var bk=V.mback&&V.mback.uid===x.uid?V.mback:null;
+ if(bk){return '<div class="stack" style="gap:8px;min-width:220px" role="group" aria-label="Confirmar voltar um passo"><p>'+(bk.to==='paid'?'Voltar para pago apaga o código de rastreio e as datas de envio e de entrega.':'Voltar para enviado apaga a data de entrega.')+'</p><div class="row" style="gap:8px">'+b('m-back-ok','Voltar o passo','go',' data-to="'+bk.to+'"')+b('m-back-cancel','Cancelar')+'</div></div>';}
  var out=[];
  if(x.status==='paid')out.push(b('m-ship-open','Marcar enviado','go'));
  if(x.status==='shipped')out.push(b('m-deliver','Marcar entregue','go'),b('m-back','Voltar para pago',null,' data-to="paid"'));
@@ -1331,7 +1333,9 @@ app.addEventListener('click',function(e){var b=e.target.closest('[data-act]');if
  else if(a==='m-ship-cancel'){if(V.mform)V.merr[V.mform.uid]='';V.mform=null;}
  else if(a==='m-ship-ok'){var mf=V.mform;if(!mf)return;medalDo(mf.uid,LetzFB.updateMedalOrder({uid:mf.uid,status:'shipped',trackingCode:mf.trk.trim(),shippedAt:mf.date||undefined}),'Marcada como enviada.');return;}
  else if(a==='m-deliver'){var du=b.getAttribute('data-uid');medalDo(du,LetzFB.updateMedalOrder({uid:du,status:'delivered'}),'Marcada como entregue.');return;}
- else if(a==='m-back'){var bu=b.getAttribute('data-uid');medalDo(bu,LetzFB.updateMedalOrder({uid:bu,status:b.getAttribute('data-to')}),'');return;}
+ else if(a==='m-back'){V.mback={uid:b.getAttribute('data-uid'),to:b.getAttribute('data-to')};V.merr[V.mback.uid]='';V.mnote[V.mback.uid]='';}
+ else if(a==='m-back-cancel'){V.mback=null;}
+ else if(a==='m-back-ok'){var bu=b.getAttribute('data-uid');V.mback=null;medalDo(bu,LetzFB.updateMedalOrder({uid:bu,status:b.getAttribute('data-to')}),'');return;}
  else if(a==='m-resend'){var ru=b.getAttribute('data-uid');medalDo(ru,LetzFB.resendMedalEmail(ru),'E-mail reenviado.',true);return;}
  else if(a==='m-copy'){var cu=b.getAttribute('data-uid'),co=(S.morders||[]).filter(function(x){return x.uid===cu;})[0];if(!co)return;var cdn=function(){V.mcopied=cu;softRender();};try{navigator.clipboard.writeText(addrFull(co.address)).then(cdn,function(){});}catch(er){}return;}
  else if(a==='cli-open'){V.cli=b.getAttribute('data-c');}
@@ -1386,7 +1390,7 @@ app.addEventListener('click',function(e){var b=e.target.closest('[data-act]');if
  else if(a==='cm-hide'){admDo(LetzFB.setCommentHidden(b.getAttribute('data-id'),b.getAttribute('data-c'),b.getAttribute('data-h')==='1'));return;}
  else if(a==='to-privacy'){V.prevView=V.view;V.view='privacy';}
  else if(a==='privacy-back'){V.view=V.prevView||'sales';}
- var keep=(a==='react'||a==='cmt-toggle'||a==='cmt-rm'||a==='ph-open'||a==='ph-remove'||a==='sheet-close'||a==='sheet-cancel'||a==='os'||a==='mark'||a==='unmark'||a==='comment'||a==='post-medal'||a==='week'||a==='t-save'||a==='t-discard'||a==='c-save'||a==='c-discard'||a==='v-add'||a==='v-rm'||a==='fin-per'||a==='fin-st'||a==='m-st'||a==='m-ship-open'||a==='m-ship-cancel'||a==='fin-tab'||a==='cli-open'||a==='cli-close'),y=window.scrollY;
+ var keep=(a==='react'||a==='cmt-toggle'||a==='cmt-rm'||a==='ph-open'||a==='ph-remove'||a==='sheet-close'||a==='sheet-cancel'||a==='os'||a==='mark'||a==='unmark'||a==='comment'||a==='post-medal'||a==='week'||a==='t-save'||a==='t-discard'||a==='c-save'||a==='c-discard'||a==='v-add'||a==='v-rm'||a==='fin-per'||a==='fin-st'||a==='m-st'||a==='m-ship-open'||a==='m-ship-cancel'||a==='m-back'||a==='m-back-cancel'||a==='fin-tab'||a==='cli-open'||a==='cli-close'),y=window.scrollY;
  render();window.scrollTo(0,keep&&!V.toTop?y:0);V.toTop=false;});
 render();
 /* dados: S é um cache preenchido pelos listeners do LetzFB; softRender redesenha sem perder rolagem nem foco */
@@ -1395,7 +1399,7 @@ function softRender(){if(V.view!=='athlete'&&V.view!=='admin'&&V.view!=='medalha
  render();window.scrollTo(0,y);if(id){var el=document.getElementById(id);if(el){el.focus({preventScroll:true});try{if(ss!==null)el.setSelectionRange(ss,se);}catch(e){}}}}
 var billUid='',billStop=null;
 function watchBill(r,uid){var w=(r==='athlete'||r==='blocked')?uid:'';if(w===billUid)return;billUid=w;if(billStop){billStop();billStop=null;}V.bill=null;if(w)billStop=LetzFB.watchBilling(function(x){V.bill=x;softRender();});}
-function resetData(){V.mo=null;V.mAuto=false;V.rsent={};V.rerr='';V.tdraft={};V.cd=null;V.cdirty=false;V.tsaved=false;V.csaved=false;V.cli=null;V.fq='';V.mst='todas';V.mq='';V.mform=null;V.merr={};V.mnote={};V.mbusy={};V.mcopied='';stops.forEach(function(f){try{f();}catch(e){}});stops=[];for(var id in cmSubs)cmSubs[id]();cmSubs={};rxLoading={};dataRole='';S=newS();}
+function resetData(){V.mo=null;V.mAuto=false;V.rsent={};V.rerr='';V.tdraft={};V.cd=null;V.cdirty=false;V.tsaved=false;V.csaved=false;V.cli=null;V.fq='';V.mst='todas';V.mq='';V.mform=null;V.mback=null;V.merr={};V.mnote={};V.mbusy={};V.mcopied='';stops.forEach(function(f){try{f();}catch(e){}});stops=[];for(var id in cmSubs)cmSubs[id]();cmSubs={};rxLoading={};dataRole='';S=newS();}
 function syncMine(){var m={},c={},ph={};S.mine.forEach(function(p){if(p.medal)return;var k=p.w+'-'+p.d;m[k]=p.at;if(p.comment)c[k]=p.comment;if(p.imgURL)ph[k]=p.imgURL;});S.marks=m;S.comments=c;S.wphotos=ph;}
 function applyCfg(c){var cf=S.cfg;if(c){if(c.start)S.start=c.start;S.texts=c.texts||{};S.videos=Array.isArray(c.videos)?c.videos:null;S.salesOpen=c.salesOpen!==false;
   ['av','wa','grupo'].forEach(function(k){if(k in c)cf[k]=c[k]||'';});}

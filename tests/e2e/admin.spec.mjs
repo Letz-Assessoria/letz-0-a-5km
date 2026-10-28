@@ -308,9 +308,22 @@ test('medalhas: marcar enviado com rastreio, contadores, e-mail, copiar endereç
   await r.getByRole('button', { name: 'Marcar entregue' }).click();
   await expect(r).toContainText('Entregue em');
   expect(await mcount(page, 'delivered')).toBeGreaterThanOrEqual(1);
+  // voltar um passo pede confirmação; cancelar não muda nada
   await r.getByRole('button', { name: 'Voltar para enviado' }).click();
+  await expect(r).toContainText('apaga a data de entrega');
+  await r.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(r.locator('.pill')).toContainText('Entregue');
+  expect((await db.doc(`users/${a.uid}/private/medal`).get()).data().status).toBe('delivered');
+  await r.getByRole('button', { name: 'Voltar para enviado' }).click();
+  await r.getByRole('button', { name: 'Voltar o passo' }).click();
   await expect(r.locator('.pill')).toContainText('Enviado');
   await r.getByRole('button', { name: 'Voltar para pago' }).click();
+  await expect(r).toContainText('apaga o código de rastreio');
+  await r.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(r.locator('.pill')).toContainText('Enviado');
+  expect((await db.doc(`users/${a.uid}/private/medal`).get()).data().trackingCode).toBe('BR123456789XX');
+  await r.getByRole('button', { name: 'Voltar para pago' }).click();
+  await r.getByRole('button', { name: 'Voltar o passo' }).click();
   await expect(r.locator('.pill')).toContainText('Pago, aguardando envio');
   await expect(r).not.toContainText('BR123456789XX');
   expect(await mcount(page, 'paid')).toBe(paid0);
