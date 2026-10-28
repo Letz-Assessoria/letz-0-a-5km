@@ -53,28 +53,10 @@ service cloud.firestore {
           && changed().hasOnly(['access', 'points', 'done'])
           && request.resource.data.access in ['pending', 'active', 'blocked']);
 
-      // private/profile e private/billing: só Functions escrevem.
+      // private/profile, billing e medal: só Functions escrevem (aluno e treinador leem).
       match /private/{docId} {
         allow read: if isOwner(uid) || isAdmin();
         allow write: if false;
-      }
-
-      // private/ship: aluno grava o endereço; treinador, paidAt/track.
-      match /private/ship {
-        function addrKeys() {
-          return ['nome', 'cep', 'rua', 'num', 'comp', 'bairro', 'cidade', 'uf', 'tel', 'at'];
-        }
-        function atOk() {
-          return !('at' in request.resource.data) || request.resource.data.at == request.time
-            || (resource != null && 'at' in resource.data && request.resource.data.at == resource.data.at);
-        }
-        allow read: if isOwner(uid) || isAdmin();
-        allow create: if isOwner(uid)
-          && request.resource.data.keys().hasOnly(addrKeys()) && atOk();
-        allow update: if
-          (isOwner(uid) && changed().hasOnly(addrKeys()) && atOk())
-          || (isAdmin() && changed().hasOnly(['paidAt', 'track']));
-        allow delete: if false;
       }
     }
 

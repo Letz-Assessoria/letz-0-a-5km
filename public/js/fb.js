@@ -387,22 +387,53 @@ function watchComments(id, cb) {
   ));
 }
 
-// Endereço da medalha: users/{uid}/private/ship (merge para não apagar paidAt/track do treinador).
-const SHIP_KEYS = ['nome', 'cep', 'rua', 'num', 'comp', 'bairro', 'cidade', 'uf', 'tel'];
-async function saveShip(addr) {
-  const { uid } = mine();
-  const data = { at: serverTimestamp() };
-  SHIP_KEYS.forEach((k) => { data[k] = String(addr[k] || ''); });
-  await setDoc(doc(db, 'users', uid, 'private', 'ship'), data, { merge: true });
+// ---------- medalha e reembolso (callables; o pedido em private/medal só as Functions escrevem) ----------
+const callMedalCheckout = httpsCallable(functions, 'startMedalCheckout');
+const callRefund = httpsCallable(functions, 'requestRefund');
+const callRebuy = httpsCallable(functions, 'rebuyProgram');
+
+// data: { useSignupAddress: true } ou { address: { cep, street, number, complement, district, city, uf } }.
+async function startMedalCheckout(data) {
+  const r = await callMedalCheckout(data);
+  return { checkoutUrl: r.data.checkoutUrl };
 }
-function watchShip(cb) {
-  return whenSession(isAthlete, (s) => onSnapshot(doc(db, 'users', s.user.uid, 'private', 'ship'),
+async function requestRefund(product) {
+  await callRefund({ product });
+}
+async function rebuyProgram() {
+  const r = await callRebuy();
+  return { checkoutUrl: r.data.checkoutUrl };
+}
+
+// Endereço do cadastro (private/profile.address); null se a conta não tem (conta antiga).
+async function loadSignupAddress() {
+  const { uid } = mine();
+  const snap = await getDoc(doc(db, 'users', uid, 'private', 'profile'));
+  return snap.exists() ? (snap.data().address || null) : null;
+}
+// Pedido da medalha ao vivo (sem a URL do checkout); cb(null) se ainda não existe.
+function watchMedal(cb) {
+  return whenSession(isAthlete, (s) => onSnapshot(doc(db, 'users', s.user.uid, 'private', 'medal'),
     (snap) => {
       if (!snap.exists()) { cb(null); return; }
       const x = snap.data({ serverTimestamps: 'estimate' });
-      cb({ ...x, at: ms(x.at), paidAt: ms(x.paidAt) });
+      cb({
+        status: x.status || 'pending', address: x.address || null, trackingCode: x.trackingCode || '',
+        shippedAt: x.shippedAt || '', deliveredAt: x.deliveredAt || '', paidAt: ms(x.paidAt),
+        refundCount: Number(x.refundCount) || 0, refundRequestedAt: ms(x.refundRequestedAt),
+      });
     },
     (err) => { fail(err); cb(null); }));
+}
+// Cobrança do programa ao vivo (aluno ativo ou bloqueado): prazo do reembolso e limite de recompra.
+function watchBilling(cb) {
+  return whenSession((s) => !!(s && s.user && s.doc && (s.doc.access === 'active' || s.doc.access === 'blocked') && !(s.claims && s.claims.admin)),
+    (s) => onSnapshot(doc(db, 'users', s.user.uid, 'private', 'billing'),
+      (snap) => {
+        const x = snap.exists() ? snap.data() : null;
+        cb(x ? { status: x.status || '', paidAt: ms(x.paidAt), refundCount: Number(x.refundCount) || 0, refundRequestedAt: ms(x.refundRequestedAt) } : null);
+      },
+      (err) => { fail(err); cb(null); }));
 }
 
 // ---------- painel do treinador (regras: só com a claim admin) ----------
@@ -422,26 +453,26 @@ async function saveConfig(patch) {
   await setDoc(doc(db, 'config', 'app'), data, { merge: true });
 }
 
-// Lista ao vivo: users + private/profile, billing e ship de cada aluno (sem CPF).
-function athleteRow(uid, u, p, b, sh) {
+// Lista ao vivo: users + private/profile, billing de cada aluno (sem CPF).
+function athleteRow(uid, u, p, b) {
   return {
     uid, name: u.name || '', handle: u.handle || '', access: u.access || 'pending',
     points: Number(u.points) || 0, done: Number(u.done) || 0, createdAt: ms(u.createdAt), profiled: u.profiled === true,
     email: (p && p.email) || '', phone: (p && p.phone) || '',
+    city: (p && p.address && p.address.city) || '', uf: (p && p.address && p.address.uf) || '',
     billing: b ? {
       status: b.status || 'pending', method: b.method || '', installments: Number(b.installments) || 0,
       paidAt: ms(b.paidAt), duplicate: !!b.duplicate, cpfConflict: !!b.cpfConflict,
       coupon: b.coupon || '', percent: Number(b.percent) || 0, value: typeof b.value === 'number' ? b.value : null, partner: b.partner === true,
     } : null,
-    ship: sh ? { ...sh, at: ms(sh.at), paidAt: ms(sh.paidAt), paid: ms(sh.paidAt) || 0 } : null,
   };
 }
 const athletes = new Map();
 let athletesEmit = null;
 async function loadAthlete(uid, u) {
   const read = async (n) => { try { const s = await getDoc(doc(db, 'users', uid, 'private', n)); return s.exists() ? s.data() : null; } catch { return null; } };
-  const [p, b, sh] = await Promise.all([read('profile'), read('billing'), read('ship')]);
-  athletes.set(uid, athleteRow(uid, u, p, b, sh));
+  const [p, b] = await Promise.all([read('profile'), read('billing')]);
+  athletes.set(uid, athleteRow(uid, u, p, b));
 }
 function emitAthletes() {
   if (athletesEmit) athletesEmit(Array.from(athletes.values()).sort((a, c) => (c.createdAt || 0) - (a.createdAt || 0)));
@@ -461,13 +492,6 @@ function listAthletes(cb) {
     (err) => { fail(err); if (alive) cb([]); },
   ));
   return () => { alive = false; athletesEmit = null; athletes.clear(); off(); };
-}
-async function refreshAthlete(uid) {
-  const prev = athletes.get(uid);
-  if (!prev) return;
-  const s = await getDoc(doc(db, 'users', uid, 'private', 'ship'));
-  athletes.set(uid, { ...prev, ship: s.exists() ? athleteRow(uid, {}, null, null, s.data()).ship : null });
-  emitAthletes();
 }
 // Alertas de pagamento (escritos pelo webhook): só os não resolvidos, mais novos primeiro.
 function listAlerts(cb) {
@@ -561,22 +585,13 @@ async function setPostHidden(postId, hidden) {
 async function setCommentHidden(postId, cid, hidden) {
   await updateDoc(doc(db, 'posts', postId, 'comments', cid), { hidden: !!hidden });
 }
-async function setShipPaid(uid, paid) {
-  await updateDoc(doc(db, 'users', uid, 'private', 'ship'), { paidAt: paid ? serverTimestamp() : deleteField() });
-  await refreshAthlete(uid);
-}
-async function setTrack(uid, code) {
-  await updateDoc(doc(db, 'users', uid, 'private', 'ship'), { track: String(code || '').trim().toUpperCase() });
-  await refreshAthlete(uid);
-}
-
 window.LetzFB = {
   app, auth, db, functions, storage,
   onSession, signup, login, logout, resetPassword, resumeCheckout, errorMessage,
   saveProfile, markWelcomed, markWorkout, unmarkWorkout, setWorkoutContent, clearWorkoutContent,
   watchMyPosts, watchFeed, loadMoreFeed, watchRanking, watchConfig,
   loadMyReactions, toggleReaction, addComment, deleteComment, watchComments,
-  saveShip, watchShip,
-  saveConfig, listAthletes, listAlerts, listPayments, resolveAlert, createPartner, createCoupon, listCoupons, listCouponUses, setCouponActive, setCouponMax, setCouponPercent, setAccess, setPostHidden, setCommentHidden, setShipPaid, setTrack,
+  startMedalCheckout, requestRefund, rebuyProgram, loadSignupAddress, watchMedal, watchBilling,
+  saveConfig, listAthletes, listAlerts, listPayments, resolveAlert, createPartner, createCoupon, listCoupons, listCouponUses, setCouponActive, setCouponMax, setCouponPercent, setAccess, setPostHidden, setCommentHidden,
 };
 document.dispatchEvent(new Event('letzfb-ready'));

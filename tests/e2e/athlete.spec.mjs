@@ -1,7 +1,8 @@
-// e2e do aluno: perfil, treinos, feed, ranking, fotos, reações, comentários e endereço da medalha.
+// e2e do aluno: perfil, treinos, feed, ranking, fotos, reações, comentários e a medalha (modal, endereço, pagamento, status e reembolso).
 import { test, expect } from '@playwright/test';
 import {
-  db, makeAthlete, makeUser, resetStart, seedConcluded, setStart, storageObject, uniqueHandle, waitUntil,
+  admin, auth, callable, checkoutPaid, clearRateLimits, db, emitMedalPaid, FAKE, makeAthlete, makeUser, mockViaCep, person,
+  resetStart, seedConcluded, setStart, storageObject, uniqueHandle, waitUntil, webhookToken, WEBHOOK,
 } from './helpers.mjs';
 
 let pageErrors = [];
@@ -191,28 +192,242 @@ test('reagir e comentar aparecem para o outro aluno', async ({ page, browser }) 
   await ctx.close();
 });
 
-test('endereço da medalha persiste após recarregar', async ({ page }) => {
-  const a = await makeAthlete();
-  await seedConcluded(a);
-  await login(page, a);
-  await expect(page).toHaveURL(/#\/app\/treinos$/);
-  await page.getByRole('button', { name: /Você concluiu o Do 0 aos 5 km/ }).click();
-  await page.getByRole('button', { name: /Informar endereço de entrega/ }).click();
-  await page.getByLabel('Nome de quem vai receber').fill('Fulana de Tal');
-  await page.getByLabel('Rua ou avenida').fill('Rua das Flores');
-  await page.getByLabel('Número').fill('10');
-  await page.getByLabel('Bairro').fill('Centro');
-  await page.getByLabel('Cidade').fill('Recife');
-  await page.getByLabel('Estado').selectOption('PE');
-  await page.getByLabel('CEP').fill('50000000');
-  await page.getByRole('button', { name: /Confirmar endereço/ }).click();
-  await expect(page.getByText('Pague com Pix')).toBeVisible();
-  await expect(page.getByText(/Simular|Versão de teste/)).toHaveCount(0);
-  await page.locator('.linkbtn', { hasText: 'Pagar depois' }).click();
+// ---------- medalha ----------
+const CHECKOUT_URL = /^http:\/\/127\.0\.0\.1:7777\/checkoutSession\/show\/[^/]+$/;
+const DAY = 864e5;
+const ts = (ms) => admin.firestore.Timestamp.fromMillis(ms);
 
-  const saved = await waitUntil(async () => (await db.doc(`users/${a.uid}/private/ship`).get()).data());
-  expect(saved.rua).toBe('Rua das Flores');
-  await page.reload();
-  await page.getByRole('button', { name: /Você concluiu o Do 0 aos 5 km/ }).click();
-  await expect(page.getByText('Rua das Flores, 10')).toBeVisible();
+// Aluno de verdade: cadastro pela callable (perfil com endereço e CPF) e pagamento pelo webhook.
+async function realStudent() {
+  await clearRateLimits();
+  const p = person();
+  const r = await callable('signup', { ...p, acceptPolicy: true });
+  expect(r.error, JSON.stringify(r.error)).toBeUndefined();
+  const uid = (await auth.getUserByEmail(p.email)).uid;
+  const billing = (await db.doc(`users/${uid}/private/billing`).get()).data();
+  const res = await fetch(`${FAKE}/__emit`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ target: WEBHOOK, token: webhookToken(), body: checkoutPaid(uid, billing.checkoutId) }),
+  });
+  expect((await res.json()).status).toBe(200);
+  await waitUntil(async () => (await db.doc('users/' + uid).get()).data().access === 'active');
+  const handle = uniqueHandle();
+  await db.doc('handles/' + handle).set({ uid });
+  await db.doc('users/' + uid).update({ profiled: true, welcomed: true, handle });
+  return { ...p, uid, handle };
+}
+
+// Aluno que concluiu: treinos gravados e marcador users.concluded já escrito pelo servidor.
+async function concludedStudent() {
+  const a = await realStudent();
+  await seedConcluded(a);
+  await waitUntil(async () => (await db.doc('users/' + a.uid).get()).data().concluded === true);
+  return a;
+}
+
+const fakeCheckout = async (id) => (await (await fetch(`${FAKE}/__checkouts`)).json()).find((c) => c.id === id);
+const noHScroll = (page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+
+test.describe('medalha', () => {
+  test('modal ao abrir: Depois fecha e o aviso continua na aba de fim', async ({ page }) => {
+    const a = await concludedStudent();
+    await login(page, a);
+    const modal = page.getByRole('dialog', { name: /Você ganhou a medalha/ });
+    await expect(modal).toBeVisible();
+    await expect(modal).toContainText('R$ 35,00');
+    await modal.getByRole('button', { name: 'Depois' }).click();
+    await expect(modal).toHaveCount(0);
+    await page.getByRole('button', { name: /Você concluiu o Do 0 aos 5 km/ }).click();
+    await expect(page).toHaveURL(/#\/app\/fim$/);
+    await page.getByRole('button', { name: /Pedir minha medalha/ }).click();
+    await expect(page.getByRole('dialog', { name: /Para onde enviamos/ })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  });
+
+  test('Continuar: endereço do cadastro numa linha, confirmar abre o checkout de R$ 35', async ({ page }) => {
+    const a = await concludedStudent();
+    await login(page, a);
+    await page.getByRole('button', { name: 'Continuar' }).click();
+    const dlg = page.getByRole('dialog', { name: /Para onde enviamos/ });
+    await expect(dlg.locator('.addrline')).toContainText('Rua da Aurora, 100 · Boa Vista · Recife/PE · CEP 50050-000');
+    await expect(dlg.getByLabel('CEP')).toHaveCount(0);
+    await dlg.getByRole('button', { name: 'Usar o endereço do cadastro' }).click();
+    await page.waitForURL(CHECKOUT_URL);
+    const co = await fakeCheckout(page.url().split('/').pop());
+    expect(co.items[0].value).toBe(35);
+    expect(co.installment).toBeNull();
+    const medal = (await db.doc(`users/${a.uid}/private/medal`).get()).data();
+    expect(medal.status).toBe('pending');
+    expect(medal.address.street).toBe('Rua da Aurora');
+  });
+
+  test('Informar outro: CEP com ViaCEP, número, e confirmar abre o checkout', async ({ page }) => {
+    await mockViaCep(page);
+    const a = await concludedStudent();
+    await login(page, a);
+    await page.getByRole('button', { name: 'Continuar' }).click();
+    await page.getByRole('button', { name: 'Informar outro' }).click();
+    await page.getByLabel('CEP').fill('50030-230');
+    await expect(page.getByText('Endereço encontrado. Falta só o número.')).toBeVisible();
+    await page.getByLabel('Número').fill('77');
+    await page.getByLabel('Complemento').fill('Apto 2');
+    await page.getByRole('button', { name: /Ir para o pagamento/ }).click();
+    await page.waitForURL(CHECKOUT_URL);
+    const medal = (await db.doc(`users/${a.uid}/private/medal`).get()).data();
+    expect(medal.address).toMatchObject({ cep: '50030230', number: '77', complement: 'Apto 2', city: 'Recife', uf: 'PE' });
+  });
+
+  test('Informar outro sem número mostra o erro e não abre pagamento', async ({ page }) => {
+    await mockViaCep(page);
+    const a = await concludedStudent();
+    await login(page, a);
+    await page.getByRole('button', { name: 'Continuar' }).click();
+    await page.getByRole('button', { name: 'Informar outro' }).click();
+    await page.getByRole('button', { name: /Ir para o pagamento/ }).click();
+    await expect(page.getByRole('alert')).toContainText('CEP');
+    await expect(page).not.toHaveURL(CHECKOUT_URL);
+  });
+
+  test('conta sem endereço no cadastro cai direto em informar outro', async ({ page }) => {
+    const a = await concludedStudent();
+    await db.doc(`users/${a.uid}/private/profile`).update({ address: admin.firestore.FieldValue.delete() });
+    await login(page, a);
+    await page.getByRole('button', { name: 'Continuar' }).click();
+    const dlg = page.getByRole('dialog', { name: /Para onde enviamos/ });
+    await expect(dlg.getByLabel('CEP')).toBeVisible();
+    await expect(dlg.getByRole('button', { name: 'Usar o endereço do cadastro' })).toHaveCount(0);
+  });
+
+  test('aluno que não concluiu não vê modal nem a aba de fim', async ({ page }) => {
+    const a = await makeAthlete();
+    await login(page, a);
+    await expect(page).toHaveURL(/#\/app\/treinos$/);
+    await expect(page.getByRole('heading', { name: /Semana/ }).first()).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Você concluiu/ })).toHaveCount(0);
+    await page.goto('/#/app/fim');
+    await expect(page).toHaveURL(/#\/app\/treinos$/);
+  });
+
+  test('#/medalha: confirmando, vira status ao webhook e mostra rastreio e datas', async ({ page }) => {
+    const a = await concludedStudent();
+    await login(page, a);
+    await page.getByRole('button', { name: 'Continuar' }).click();
+    await page.getByRole('button', { name: 'Usar o endereço do cadastro' }).click();
+    await page.waitForURL(CHECKOUT_URL);
+    const checkoutId = page.url().split('/').pop();
+
+    await page.goto('/#/medalha');
+    await expect(page.getByText('Confirmando seu pagamento…')).toBeVisible();
+    expect(await emitMedalPaid(checkoutId)).toBe(200);
+    await expect(page.getByText('Pago, aguardando envio')).toBeVisible();
+    await expect(page.getByText('Rua da Aurora, 100')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Solicitar reembolso' })).toBeVisible();
+    // pago: o modal não volta
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    await db.doc(`users/${a.uid}/private/medal`).update({ status: 'shipped', trackingCode: 'BR123456789BR', shippedAt: '2026-11-03' });
+    await expect(page.getByText('Enviada', { exact: true })).toBeVisible();
+    await expect(page.getByText('03/11/2026')).toBeVisible();
+    await expect(page.locator('#trk-code')).toHaveText('BR123456789BR');
+    await expect(page.getByRole('button', { name: 'Solicitar reembolso' })).toHaveCount(0);
+    await expect(page.getByText(/para qualquer reembolso fale com os instrutores/)).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Falar com a assessoria' })).toHaveAttribute('href', /^https:\/\/wa\.me\/\d+\?text=/);
+
+    await db.doc(`users/${a.uid}/private/medal`).update({ status: 'delivered', deliveredAt: '2026-11-09' });
+    await expect(page.getByText('Entregue', { exact: true })).toBeVisible();
+    await expect(page.getByText('09/11/2026')).toBeVisible();
+    expect(await noHScroll(page)).toBe(true);
+  });
+
+  test('#/medalha sem pedido pago não finge pagamento', async ({ page }) => {
+    const a = await concludedStudent();
+    await login(page, a);
+    await expect(page).toHaveURL(/#\/app\/treinos$/);
+    await page.goto('/#/medalha');
+    await expect(page.getByText('Você ainda não tem uma medalha paga.')).toBeVisible();
+    await page.getByRole('button', { name: 'Voltar ao app' }).click();
+    await expect(page).toHaveURL(/#\/app\/fim$/);
+  });
+
+  test('reembolso do medalha pago: botão registra o pedido e abre o WhatsApp', async ({ page }) => {
+    await page.addInitScript(() => { window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; }; });
+    const a = await concludedStudent();
+    await db.doc(`users/${a.uid}/private/medal`).set({
+      status: 'paid', paidAt: ts(Date.now()), refundCount: 0,
+      address: { cep: '50050000', street: 'Rua da Aurora', number: '100', complement: '', district: 'Boa Vista', city: 'Recife', uf: 'PE' },
+    });
+    await login(page, a);
+    await page.getByRole('button', { name: /Você concluiu o Do 0 aos 5 km/ }).click();
+    await page.getByRole('button', { name: 'Solicitar reembolso' }).click();
+    await expect(page.getByText('Pedido de reembolso registrado.')).toBeVisible();
+    const opened = await page.evaluate(() => window.__opened);
+    expect(opened).toHaveLength(1);
+    expect(opened[0]).toMatch(/^https:\/\/wa\.me\/\d+\?text=/);
+    expect(decodeURIComponent(opened[0])).toContain('reembolso da medalha');
+    expect(decodeURIComponent(opened[0])).toContain(a.email);
+    await waitUntil(async () => (await db.doc(`users/${a.uid}/private/medal`).get()).data().refundRequestedAt);
+  });
+
+  test('reembolso do programa: contador de dias, WhatsApp e, depois do prazo, só o contato', async ({ page }) => {
+    await page.addInitScript(() => { window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; }; });
+    const a = await realStudent();
+    await db.doc(`users/${a.uid}/private/billing`).update({ paidAt: ts(Date.now() - 2 * DAY) });
+    await login(page, a);
+    const card = page.locator('#refund-program');
+    await expect(card).toContainText('Faltam 5 dias do prazo de reembolso');
+    await card.getByRole('button', { name: 'Solicitar reembolso' }).click();
+    await expect(card.getByText('Pedido de reembolso registrado.')).toBeVisible();
+    const opened = await page.evaluate(() => window.__opened);
+    expect(opened).toHaveLength(1);
+    expect(decodeURIComponent(opened[0])).toContain('reembolso do programa');
+    await waitUntil(async () => (await db.doc(`users/${a.uid}/private/billing`).get()).data().refundRequestedAt);
+
+    await db.doc(`users/${a.uid}/private/billing`).update({ paidAt: ts(Date.now() - 8 * DAY) });
+    await expect(card.getByRole('button', { name: 'Solicitar reembolso' })).toHaveCount(0);
+    await expect(card.getByRole('link', { name: 'Falar com a assessoria' })).toHaveAttribute('href', /^https:\/\/wa\.me\//);
+  });
+
+  test('conta reembolsada vê Comprar de novo e vai ao checkout do programa; com refundCount 2 só o contato', async ({ page }) => {
+    const a = await realStudent();
+    await db.doc(`users/${a.uid}/private/billing`).update({ status: 'refunded', refundCount: 1 });
+    await db.doc('users/' + a.uid).update({ access: 'blocked' });
+    await login(page, a);
+    await expect(page).toHaveURL(/#\/bloqueado$/);
+    await page.getByRole('button', { name: /Comprar de novo/ }).click();
+    await page.waitForURL(CHECKOUT_URL);
+    const co = await fakeCheckout(page.url().split('/').pop());
+    expect(co.items[0].value).toBe(159);
+
+    const b = await realStudent();
+    await db.doc(`users/${b.uid}/private/billing`).update({ status: 'refunded', refundCount: 2 });
+    await db.doc('users/' + b.uid).update({ access: 'blocked' });
+    const ctx = await page.context().browser().newContext();
+    const pb = await ctx.newPage();
+    await login(pb, b);
+    await expect(pb).toHaveURL(/#\/bloqueado$/);
+    await expect(pb.getByText(/Você já usou a compra de novo/)).toBeVisible();
+    await expect(pb.getByRole('button', { name: /Comprar de novo/ })).toHaveCount(0);
+    await expect(pb.getByRole('link', { name: 'Chamar no WhatsApp' })).toBeVisible();
+    await ctx.close();
+  });
+
+  test('390 px: modal, conclusão e medalha sem rolagem horizontal', async ({ page }) => {
+    await mockViaCep(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    const a = await concludedStudent();
+    await login(page, a);
+    await expect(page.getByRole('dialog', { name: /Você ganhou a medalha/ })).toBeVisible();
+    expect(await noHScroll(page)).toBe(true);
+    await page.getByRole('button', { name: 'Continuar' }).click();
+    await page.getByRole('button', { name: 'Informar outro' }).click();
+    await page.getByLabel('CEP').fill('50030-230');
+    await expect(page.getByLabel('Número')).toBeVisible();
+    expect(await noHScroll(page)).toBe(true);
+    await page.keyboard.press('Escape');
+    await page.goto('/#/app/fim');
+    expect(await noHScroll(page)).toBe(true);
+  });
 });

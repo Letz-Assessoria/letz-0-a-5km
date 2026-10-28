@@ -144,6 +144,21 @@ export async function setStart(ms = Date.now() - 2 * 864e5) {
   await db.doc('config/app').set({ start: admin.firestore.Timestamp.fromMillis(ms), salesOpen: true });
 }
 
+// Aviso do Asaas de que a medalha foi paga (Pix de R$ 35 do checkout `checkoutId`), pelo webhook de verdade.
+export async function emitMedalPaid(checkoutId, value = 35) {
+  const e = structuredClone(events.pixReceived);
+  e.id = 'evt_e2e_medal_' + Math.random();
+  e.payment.checkoutSession = checkoutId;
+  e.payment.value = value;
+  e.payment.netValue = value - 0.99;
+  const r = await fetch(`${FAKE}/__emit`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ target: WEBHOOK, token: webhookToken(), body: e }),
+  });
+  return (await r.json()).status;
+}
+
 export async function resetStart() {
   await db.doc('config/app').set({
     start: admin.firestore.Timestamp.fromDate(new Date('2026-11-08T18:00:00-03:00')), salesOpen: true,

@@ -109,10 +109,9 @@ describe('firestore.rules', () => {
     await seed(async (f) => {
       await setDoc(doc(f, `users/${BOB}/private/profile`), { email: 'b@x.com', cpf: '123', phone: '9' });
       await setDoc(doc(f, `users/${BOB}/private/billing`), { status: 'paid' });
-      await setDoc(doc(f, `users/${BOB}/private/ship`), { nome: 'Bob', cep: '1' });
       await setDoc(doc(f, `users/${BOB}/private/medal`), { status: 'paid' });
     });
-    for (const p of ['profile', 'billing', 'ship']) {
+    for (const p of ['profile', 'billing', 'medal']) {
       await assertFails(getDoc(doc(db(ALICE), `users/${BOB}/private/${p}`)));
       await assertSucceeds(getDoc(doc(db(BOB), `users/${BOB}/private/${p}`)));
       await assertSucceeds(getDoc(doc(adminDb(), `users/${BOB}/private/${p}`)));
@@ -135,19 +134,6 @@ describe('firestore.rules', () => {
     await assertFails(setDoc(doc(db(ALICE), `users/${ALICE}/private/billing`), { status: 'paid' }));
     await assertFails(setDoc(doc(adminDb(), `users/${ALICE}/private/billing`), { status: 'paid' }));
     await assertFails(setDoc(doc(db(ALICE), `users/${ALICE}/private/outro`), { x: 1 }));
-  });
-
-  it('ship: aluno escreve endereço mas não paidAt/track; treinador escreve paidAt/track', async () => {
-    const ref = doc(db(ALICE), `users/${ALICE}/private/ship`);
-    const addr = { nome: 'Alice', cep: '50000-000', rua: 'Rua A', num: '1', comp: '', bairro: 'B', cidade: 'Recife', uf: 'PE', tel: '81999999999', at: serverTimestamp() };
-    await assertSucceeds(setDoc(ref, addr));
-    await assertSucceeds(updateDoc(ref, { num: '2' }));
-    await assertFails(updateDoc(ref, { paidAt: serverTimestamp() }));
-    await assertFails(updateDoc(ref, { track: 'BR123' }));
-    await assertFails(setDoc(doc(db(BOB), `users/${ALICE}/private/ship`), addr));
-    const aref = doc(adminDb(), `users/${ALICE}/private/ship`);
-    await assertSucceeds(updateDoc(aref, { paidAt: serverTimestamp(), track: 'BR123' }));
-    await assertFails(updateDoc(aref, { rua: 'Outra' }));
   });
 
   it('users: trocar handle sem reservar handles/ é negado', async () => {
