@@ -576,6 +576,20 @@ describe('reembolso e recompra', () => {
       assert.equal(sent[sent.length - 1].items[0].value, 159);
     });
 
+    it('vendas fechadas: recusa e nenhum checkout; reabertas, recompra normal', async () => {
+      const s = await refunded();
+      await db.doc('config/app').set({ salesOpen: false });
+      const n = (await sentCheckouts()).length;
+      const r = await call('rebuyProgram', {}, s.token);
+      assert.equal(r.error.status, 'FAILED_PRECONDITION');
+      assert.match(r.error.message, /vendas desta turma estão fechadas/);
+      assert.equal((await sentCheckouts()).length, n);
+      assert.equal((await billingOf(s.uid)).status, 'refunded');
+      await db.doc('config/app').set({ salesOpen: true });
+      assert.equal((await call('rebuyProgram', {}, s.token)).error, undefined);
+      assert.equal((await sentCheckouts()).length, n + 1);
+    });
+
     it('refundCount 2: recusado e nenhum checkout novo', async () => {
       const s = await refunded();
       await db.doc(`users/${s.uid}/private/billing`).update({ refundCount: 2 });

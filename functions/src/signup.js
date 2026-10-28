@@ -365,15 +365,20 @@ async function openCheckout(db, uid, { rebuy = false } = {}) {
   return checkout.url;
 }
 
+// Interruptor de vendas (config/app.salesOpen === false): vale para signup e recompra.
+async function assertSalesOpen(db) {
+  const config = await db.doc('config/app').get();
+  if (config.exists && config.get('salesOpen') === false) {
+    throw new HttpsError('failed-precondition', MSG_SALES_CLOSED);
+  }
+}
+
 async function signup(request) {
   const { name, email, password, cpf, phone, address, coupon } = validate(request.data);
   const db = getFirestore();
   await rateLimit(db, request);
 
-  const config = await db.doc('config/app').get();
-  if (config.exists && config.get('salesOpen') === false) {
-    throw new HttpsError('failed-precondition', MSG_SALES_CLOSED);
-  }
+  await assertSalesOpen(db);
 
   // E-mail já cadastrado: falha antes de tocar em qualquer CPF.
   try {
@@ -507,6 +512,7 @@ async function rebuyProgram(request) {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Entre com seu e-mail e senha.');
   const uid = request.auth.uid;
   const db = getFirestore();
+  await assertSalesOpen(db);
   const [user, billingSnap] = await Promise.all([
     db.doc('users/' + uid).get(),
     db.doc(`users/${uid}/private/billing`).get(),
