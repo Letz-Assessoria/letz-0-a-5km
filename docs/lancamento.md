@@ -81,6 +81,8 @@ Verificar: `gcloud projects get-iam-policy $PROJECT --flatten=bindings --filter=
 
 `ASAAS_API_KEY` é a chave de **produção** do Asaas. `ASAAS_WEBHOOK_TOKEN` tem 32 caracteres ou mais, aleatórios, sem sequência de dígitos. Guarde o token num cofre de senhas: ele é usado de novo no passo 11.
 
+`GMAIL_APP_PASSWORD` é a senha de app do Gmail `letzassessoria@gmail.com`, usada no aviso de medalha enviada por e-mail (`functions/src/mailer.js`, SMTP do Gmail). **Esse secret já foi criado em produção (projeto `letz-0-aos-5km`) e validado no SMTP.** Para recriar ou trocar a senha: `firebase functions:secrets:set GMAIL_APP_PASSWORD --project $PROJECT` (cole a senha quando o comando esperar entrada). Sem o secret, o envio real fica desligado: `updateMedalOrder` e `resendMedalEmail` continuam funcionando, mas o e-mail não sai e o painel mostra "E-mail não enviado" (o pedido fica `emailedAt` vazio) até o secret existir e o treinador usar "Reenviar e-mail". No emulador o envio sempre usa o transporte falso.
+
 ```bash
 printf '%s' "$(openssl rand -base64 36 | tr -d '/+=\n' | cut -c1-40)" | firebase functions:secrets:set ASAAS_WEBHOOK_TOKEN --data-file=- --project $PROJECT
 # cole a chave de produção quando o comando esperar entrada; não ponha a chave na linha de comando
@@ -91,7 +93,7 @@ Verificar: `firebase functions:secrets:access ASAAS_WEBHOOK_TOKEN --project $PRO
 
 ## 7. Deploy das Functions
 
-Os parâmetros não secretos estão em `functions/.env.letz-0-aos-5km` (Asaas de produção, `APP_URL`, preço). Confira que `ASAAS_BASE_URL=https://api.asaas.com/v3`.
+Os parâmetros não secretos estão em `functions/.env.letz-0-aos-5km` (Asaas de produção, `APP_URL`, `PROGRAM_PRICE=159.00` e `MEDAL_PRICE=35.00`, o frete da medalha; o mesmo par existe em `.env.letz-0-aos-5km-dev` e `.env.local`). Confira que `ASAAS_BASE_URL=https://api.asaas.com/v3`.
 
 ```bash
 firebase deploy --only functions --project $PROJECT --force
@@ -100,22 +102,22 @@ firebase deploy --only functions --project $PROJECT --force
 - `--force` aceita a política de limpeza de imagens do Artifact Registry sem perguntar.
 - No primeiro deploy de 2ª geração, o Eventarc pode demorar a propagar e as Functions de gatilho (`onPostWritten`, `onReactionWritten`, `onUserWritten`, `onConfigWritten`) falham com erro de permissão. Espere alguns minutos e rode o mesmo comando de novo; é seguro repetir.
 
-Verificar: `firebase functions:list --project $PROJECT` mostra `signup`, `resumeCheckout`, `createPartner`, `createCoupon`, `asaasWebhook` e as quatro de gatilho, todas em `southamerica-east1`.
+Verificar: `firebase functions:list --project $PROJECT` mostra `signup`, `resumeCheckout`, `rebuyProgram`, `requestRefund`, `startMedalCheckout`, `updateMedalOrder`, `resendMedalEmail`, `createPartner`, `createCoupon`, `asaasWebhook` e as quatro de gatilho, todas em `southamerica-east1`.
 
 ## 8. Chamada pública (Cloud Run invoker)
 
-As Functions HTTP (`signup`, `resumeCheckout`, `createPartner`, `createCoupon` e `asaasWebhook`) precisam aceitar chamadas sem login do Google (a segurança está dentro delas: token do webhook, validação dos dados e limite de cadastros no signup). O deploy de dev esqueceu isso em duas.
+As Functions HTTP (`signup`, `resumeCheckout`, `rebuyProgram`, `requestRefund`, `startMedalCheckout`, `updateMedalOrder`, `resendMedalEmail`, `createPartner`, `createCoupon` e `asaasWebhook`) precisam aceitar chamadas sem login do Google (a segurança está dentro delas: token do webhook, validação dos dados e limite de cadastros no signup). O deploy de dev esqueceu isso em duas. Cada função nova da medalha e do reembolso entra nesta lista; sem o `allUsers`, o navegador recebe erro de CORS/403 ao chamá-la.
 
 ```bash
-for fn in signup resumecheckout createpartner createcoupon asaaswebhook; do
+for fn in signup resumecheckout rebuyprogram requestrefund startmedalcheckout updatemedalorder resendmedalemail createpartner createcoupon asaaswebhook; do
   gcloud run services add-iam-policy-binding $fn --region=$REGION --member=allUsers --role=roles/run.invoker --project=$PROJECT
   gcloud run services get-iam-policy $fn --region=$REGION --project=$PROJECT | grep -A1 'allUsers'
 done
 ```
 
-As callables `createPartner` e `createCoupon` também precisam do `allUsers` (callable v2 é Cloud Run); a checagem de admin (claim `admin === true`) está no código delas, então anônimo e aluno recebem recusa.
+As callables `createPartner`, `createCoupon`, `updateMedalOrder` e `resendMedalEmail` também precisam do `allUsers` (callable v2 é Cloud Run); a checagem de admin (claim `admin === true`) está no código delas, então anônimo e aluno recebem recusa. `requestRefund`, `startMedalCheckout` e `rebuyProgram` exigem login do aluno dentro do código.
 
-Verificar: cada um dos cinco imprime `- allUsers` com `roles/run.invoker`. Sem isso, `signup` falha no site e `asaasWebhook` devolve 403 ao Asaas (pagamentos nunca ativam e a fila é pausada).
+Verificar: cada um dos dez imprime `- allUsers` com `roles/run.invoker`. Sem isso, `signup` falha no site e `asaasWebhook` devolve 403 ao Asaas (pagamentos nunca ativam e a fila é pausada).
 
 ## 9. Config da turma e TTL
 
@@ -203,7 +205,18 @@ Além disso, o painel do treinador mostra "Atenção: N alertas de pagamento" (c
 7. Treinador: entrar, abrir Atletas (sem alertas pendentes), abrir Feed e Medalhas.
 8. **IP do rate limit** (premissa não verificada): o cadastro usa o último salto de `x-forwarded-for` como IP do cliente. Faça dois cadastros de teste de redes diferentes (Wi-Fi e dados móveis) e confira que aparecem **dois** documentos `rateLimits/signup_<hash>` diferentes, cada um com `count: 1`. Se aparecer um só, o salto está errado: troque para o penúltimo salto ou `rawRequest.ip` em `functions/src/signup.js` (`clientIp`) antes de abrir as vendas. Único limite que bloqueia: 20 tentativas por IP por hora (o app mostra "Muitas tentativas"). Além disso, mais de 300 cadastros concluídos na mesma hora geram um alerta `signup-spike` no painel (só aviso, nunca recusa ninguém).
 
-Apague os dados de teste depois (usuário no Auth, `users/{uid}`, `cpfs/{cpf}`, `handles/{h}`).
+### Medalha (depois do programa, antes de 08/11/2026 se possível)
+
+1. Com um aluno de teste, chegar à conclusão (regra "24+3": pelo menos 24 dos 30 treinos e os três últimos dias da semana 10, chaves `10-0`, `10-1` e `10-2`): o app mostra "Você concluiu o Do 0 aos 5 km" e abre o modal da medalha. (Em produção a conclusão só ocorre depois das 10 semanas; para testar antes, use uma turma de teste ou marque `users/{uid}.concluded` pelo console e apague depois.)
+2. Informar o endereço (do cadastro ou outro) e confirmar: abre o checkout do Asaas de **R$ 35,00**, Pix ou cartão à vista. Pague e volte ao app: `#/medalha` mostra "Confirmando seu pagamento…" e vira "Pago, aguardando envio".
+3. Webhook: o evento aparece em `asaasEvents`, `users/{uid}/private/medal` fica `paid` e há uma linha em `payments` com produto "Medalha". A venda da medalha não entra em receita, ticket médio nem Clientes do painel.
+4. Painel, aba Medalhas: o pedido aparece em "Pago, aguardando envio" com o endereço completo. Marque enviado com um código de rastreio (13 caracteres, como `BR123456789BR`) e a data.
+5. E-mail: o aluno recebe "Sua medalha Letz bora! foi enviada" com o rastreio, de `letzassessoria@gmail.com`. Se o painel mostrar "E-mail não enviado", confira o secret `GMAIL_APP_PASSWORD` e use "Reenviar e-mail".
+6. Post no feed: com a medalha em "Enviado" ou "Entregue", o aluno pode postar uma vez (foto e comentário opcionais); o post aparece no feed com a etiqueta "Medalha". Marque "Entregue" no painel. "Voltar um passo" no painel pede confirmação e apaga rastreio e datas.
+7. Reembolso: com o pedido ainda em "Pago", "Solicitar reembolso" abre o WhatsApp da assessoria e marca "Pediu reembolso" no painel (Medalhas e Atletas). Reembolse no Asaas: o pedido vai a "Reembolsado". Depois de enviado o botão some. No programa, o botão tem o contador dos 7 dias.
+8. Limite de recompra: depois do primeiro reembolso total o aluno vê "Comprar de novo" (programa) ou pode pedir a medalha de novo; depois do segundo reembolso (`refundCount` 2) só aparece "Falar com a assessoria", e a callable recusa mesmo chamada direto.
+
+Apague os dados de teste depois (usuário no Auth, `users/{uid}`, `cpfs/{cpf}`, `handles/{h}`, pedido em `users/{uid}/private/medal`).
 
 ## 14. Reversão
 
