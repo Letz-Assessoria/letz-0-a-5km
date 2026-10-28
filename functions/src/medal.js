@@ -88,6 +88,8 @@ async function startMedalCheckout(request) {
     tx.set(db.doc('checkouts/' + checkout.id), {
       kind: 'medal', uid, value, createdAt: FieldValue.serverTimestamp(), expiresAt, status: 'active',
     });
+    // Marca o aluno com pedido: a aba Medalhas do treinador lista quem tem pedido mesmo sem concluded.
+    tx.update(db.doc('users/' + uid), { medalOrder: true });
     tx.set(medalRef, {
       status: 'pending', address, checkoutId: checkout.id, url: checkout.url, expiresAt,
       refundCount: (c && c.refundCount) || 0, updatedAt: FieldValue.serverTimestamp(),

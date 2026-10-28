@@ -70,6 +70,39 @@ describe('functions de dados', () => {
     await db.doc('posts/ana_10-1').delete();
     await waitFor(async () => (await db.doc('users/ana').get()).get('concluded') === false);
   });
+  for (const status of ['paid', 'shipped', 'delivered']) {
+    it(`concluded: com o pedido da medalha ${status}, desmarcar um treino mantém concluded true (e pontos seguem)`, async () => {
+      await mkUser('ana');
+      const keys = [];
+      for (let w = 0; w < 8; w++) for (let d = 0; d < 3; d++) keys.push([w, d]);
+      keys.push([10, 0], [10, 1], [10, 2]);
+      for (const [w, d] of keys.slice(0, 21)) await mkPost('ana', w, d, START + HOUR);
+      for (const [w, d] of keys.slice(24)) await mkPost('ana', w, d, START + HOUR);
+      await waitFor(async () => (await db.doc('users/ana').get()).get('concluded') === true);
+      const before = (await db.doc('users/ana').get()).data();
+      await db.doc('users/ana/private/medal').set({ status, refundCount: 0 });
+      await db.doc('posts/ana_10-1').delete();
+      // O recálculo rodou quando os pontos mudaram; a conclusão tem de continuar.
+      await waitFor(async () => (await db.doc('users/ana').get()).get('done') === before.done - 1);
+      assert.equal((await db.doc('users/ana').get()).get('concluded'), true);
+    });
+  }
+  it('concluded: pedido da medalha pending ou refunded não segura o marcador (volta a false)', async () => {
+    for (const status of ['pending', 'refunded']) {
+      await wipe();
+      await db.doc('config/app').set({ start: Timestamp.fromMillis(START) });
+      await mkUser('ana');
+      const keys = [];
+      for (let w = 0; w < 8; w++) for (let d = 0; d < 3; d++) keys.push([w, d]);
+      keys.push([10, 0], [10, 1], [10, 2]);
+      for (const [w, d] of keys.slice(0, 21)) await mkPost('ana', w, d, START + HOUR);
+      for (const [w, d] of keys.slice(24)) await mkPost('ana', w, d, START + HOUR);
+      await waitFor(async () => (await db.doc('users/ana').get()).get('concluded') === true);
+      await db.doc('users/ana/private/medal').set({ status, refundCount: 0 });
+      await db.doc('posts/ana_10-1').delete();
+      await waitFor(async () => (await db.doc('users/ana').get()).get('concluded') === false);
+    }
+  });
   it('points: post da medalha (sem w/d) não conta pontos, done nem conclusão', async () => {
     await mkUser('ana');
     await db.doc('posts/ana_medal').set({

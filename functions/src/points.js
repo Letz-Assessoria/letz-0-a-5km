@@ -19,15 +19,22 @@ function marksFromPosts(posts) {
   return marks;
 }
 
+// Pedido da medalha que já foi pago: a conclusão que o motivou não pode mais ser desfeita.
+const MEDAL_PAID = ['paid', 'shipped', 'delivered'];
+
 // Recalcula points/done de um aluno a partir dos posts, em transação. Só grava se mudou.
 async function recomputeUser(db, uid, startMs) {
   const userRef = db.doc('users/' + uid);
   await db.runTransaction(async (tx) => {
-    const [user, posts] = await Promise.all([tx.get(userRef), tx.get(db.collection('posts').where('uid', '==', uid))]);
+    const [user, posts, medal] = await Promise.all([
+      tx.get(userRef), tx.get(db.collection('posts').where('uid', '==', uid)), tx.get(db.doc(`users/${uid}/private/medal`)),
+    ]);
     if (!user.exists) return;
     const marks = marksFromPosts(posts);
     const { points, done } = core.pointsFor(marks, startMs);
-    const concluded = core.isConcluded(marks);
+    // Com a medalha paga (paid/shipped/delivered) o marcador fica: é ele que mantém o pedido
+    // na aba Medalhas do treinador, mesmo se o aluno desmarcar um treino depois.
+    const concluded = core.isConcluded(marks) || (user.get('concluded') === true && medal.exists && MEDAL_PAID.includes(medal.get('status')));
     const upd = {};
     if (user.get('points') !== points || user.get('done') !== done) { upd.points = points; upd.done = done; }
     if ((user.get('concluded') === true) !== concluded) upd.concluded = concluded;

@@ -560,7 +560,8 @@ function medalOrderRow(uid, u, m) {
   };
 }
 function listMedalOrders(cb) {
-  const users = new Map();
+  const users = new Map(); // uid -> dados do usuário
+  const via = new Map(); // uid -> consultas que o incluem ('concluded' e/ou 'order')
   const orders = new Map();
   const subs = new Map();
   let alive = true;
@@ -572,15 +573,20 @@ function listMedalOrders(cb) {
   const watch = (uid) => onSnapshot(doc(db, 'users', uid, 'private', 'medal'),
     (snap) => { orders.set(uid, snap.exists() ? snap.data({ serverTimestamps: 'estimate' }) : null); emit(); },
     (err) => { fail(err); orders.set(uid, null); emit(); });
-  const off = whenSession((s) => !!(s && s.user && s.claims && s.claims.admin === true), () => onSnapshot(
-    query(collection(db, 'users'), where('concluded', '==', true)),
+  // Duas consultas: quem concluiu (users.concluded) e quem tem pedido (users.medalOrder, gravado
+  // pelo servidor ao abrir o pedido). Quem tem pedido continua na lista mesmo sem concluded.
+  const listen = (key, field) => onSnapshot(
+    query(collection(db, 'users'), where(field, '==', true)),
     (snap) => {
       snap.docChanges().forEach((c) => {
         const uid = c.doc.id;
-        if (c.type === 'removed') {
-          users.delete(uid); orders.delete(uid);
+        const set = via.get(uid) || new Set();
+        if (c.type === 'removed') set.delete(key); else set.add(key);
+        via.set(uid, set);
+        if (!set.size) {
+          via.delete(uid); users.delete(uid); orders.delete(uid);
           if (subs.has(uid)) { subs.get(uid)(); subs.delete(uid); }
-        } else {
+        } else if (c.type !== 'removed') {
           users.set(uid, c.doc.data());
           if (!subs.has(uid)) subs.set(uid, watch(uid));
         }
@@ -588,7 +594,11 @@ function listMedalOrders(cb) {
       emit();
     },
     (err) => { fail(err); if (alive) cb([]); },
-  ));
+  );
+  const off = whenSession((s) => !!(s && s.user && s.claims && s.claims.admin === true), () => {
+    const offs = [listen('concluded', 'concluded'), listen('order', 'medalOrder')];
+    return () => offs.forEach((f) => f());
+  });
   return () => { alive = false; off(); subs.forEach((f) => f()); subs.clear(); };
 }
 // Datas AAAA-MM-DD em texto; sem data o servidor usa hoje. Devolve { emailed }.

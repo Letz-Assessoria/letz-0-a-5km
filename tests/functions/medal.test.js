@@ -158,6 +158,14 @@ describe('medalha: startMedalCheckout', () => {
     assert.equal(co.value, 35);
   });
 
+  it('abrir o pedido marca users.medalOrder (a aba Medalhas lista quem tem pedido, mesmo sem concluded)', async () => {
+    const s = await concluded();
+    assert.equal((await get('users/' + s.uid)).medalOrder, undefined);
+    const r = await call('startMedalCheckout', { useSignupAddress: true }, s.token);
+    assert.equal(r.error, undefined, JSON.stringify(r.error));
+    assert.equal((await get('users/' + s.uid)).medalOrder, true);
+  });
+
   it('endereço novo (useSignupAddress false) vai para o checkout e para medal.address', async () => {
     const s = await concluded();
     const address = { cep: '01310-100', street: 'Avenida Paulista', number: '1000', complement: '', district: 'Bela Vista', city: 'São Paulo', uf: 'sp' };

@@ -329,6 +329,22 @@ test('medalhas: marcar enviado com rastreio, contadores, e-mail, copiar endereç
   expect(await mcount(page, 'paid')).toBe(paid0);
 });
 
+test('medalhas: pedido pago continua na lista quando o aluno desmarca um treino (concluded segue true) e quem tem pedido sem concluded também aparece', async ({ page }) => {
+  const a = await concludedAthlete('Paulo Pago Desmarcou', { status: 'paid', checkoutId: 'ck-med-un', paidAt: new Date() });
+  await db.doc('users/' + a.uid).update({ medalOrder: true });
+  const done0 = (await db.doc('users/' + a.uid).get()).data().done;
+  await db.doc(`posts/${a.uid}_10-1`).delete();
+  await waitUntil(async () => (await db.doc('users/' + a.uid).get()).data().done < done0);
+  expect((await db.doc('users/' + a.uid).get()).data().concluded).toBe(true);
+  // Conta com pedido pago mas sem o marcador concluded (ex.: dado legado): a lista usa medalOrder.
+  const b = await makeAthlete({ name: 'Beatriz Pedido Sem Marcador' });
+  await db.doc('users/' + b.uid).update({ medalOrder: true });
+  await db.doc(`users/${b.uid}/private/medal`).set({ status: 'paid', address: ADDR, refundCount: 0, checkoutId: 'ck-med-b', paidAt: new Date(), updatedAt: new Date() });
+  await coachPanel(page, 'Medalhas');
+  await expect(mrow(page, 'Paulo Pago Desmarcou')).toContainText('Pago, aguardando envio');
+  await expect(mrow(page, 'Beatriz Pedido Sem Marcador')).toContainText('Pago, aguardando envio');
+});
+
 test('medalhas: enviado sem e-mail mostra o aviso e Reenviar e-mail resolve; falha do envio aparece', async ({ page }) => {
   const a = await concludedAthlete('Otávia Sem Email', {
     status: 'shipped', checkoutId: 'ck-med-2', paidAt: new Date(), trackingCode: 'BR000111222', shippedAt: '2026-11-01',
