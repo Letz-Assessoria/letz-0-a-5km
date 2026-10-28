@@ -12,6 +12,7 @@ const { onCall, onRequest } = require('firebase-functions/v2/https');
 const { ASAAS_API_KEY, ASAAS_WEBHOOK_TOKEN } = require('./src/billing-config.js');
 const signup = require('./src/signup.js');
 const partners = require('./src/partners.js');
+const medal = require('./src/medal.js');
 const webhook = require('./src/webhook.js');
 
 exports.onPostWritten = onDocumentWritten('posts/{postId}', points.onPostChange);
@@ -21,6 +22,7 @@ exports.onConfigWritten = onDocumentWritten({ document: 'config/app', timeoutSec
 
 exports.signup = onCall({ secrets: [ASAAS_API_KEY] }, signup.signup);
 exports.resumeCheckout = onCall({ secrets: [ASAAS_API_KEY] }, signup.resumeCheckout);
+exports.startMedalCheckout = onCall({ secrets: [ASAAS_API_KEY] }, medal.startMedalCheckout);
 exports.createPartner = onCall(partners.createPartner);
 exports.createCoupon = onCall(partners.createCoupon);
 exports.asaasWebhook = onRequest({ secrets: [ASAAS_WEBHOOK_TOKEN] }, webhook.asaasWebhook);

@@ -1,0 +1,110 @@
+// Callable da medalha: abre (ou reabre) o checkout de R$ 35 do aluno que concluiu o programa.
+// O pedido fica em users/{uid}/private/medal; o webhook (Task 3) o leva a "paid".
+const { HttpsError } = require('firebase-functions/v2/https');
+const logger = require('firebase-functions/logger');
+const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
+const core = require('../shared/core.js');
+const { asaasClient, medalCheckoutArgs, customerDataOf, MEDAL_PRICE } = require('./billing-config.js');
+const { safeErr } = require('./safe.js');
+
+const MSG_ADDRESS = 'Confira o endereço: CEP, rua, número, bairro, cidade e estado.';
+const MSG_NOT_ELIGIBLE = 'A medalha é para quem concluiu o programa.';
+const MSG_TAKEN = 'A medalha já foi paga.';
+const MSG_LIMIT = 'Não foi possível comprar a medalha. Fale com a assessoria no WhatsApp.';
+const MSG_UNAVAILABLE = 'Não conseguimos abrir o pagamento agora. Tente de novo em instantes.';
+const REFUND_LIMIT = 2; // pode comprar enquanto refundCount < 2
+// O checkout salvo só é reaproveitado se ainda tiver esta folga até vencer.
+const REUSE_MARGIN_MS = 5 * 60000;
+const PAID = ['paid', 'shipped', 'delivered'];
+
+const sameAddress = (a, b) => !!a && !!b && ['cep', 'street', 'number', 'complement', 'district', 'city', 'uf'].every((k) => a[k] === b[k]);
+const reusable = (medal, address) => !!(medal && medal.status === 'pending' && medal.url && medal.expiresAt
+  && medal.expiresAt.toMillis() - REUSE_MARGIN_MS > Date.now() && sameAddress(medal.address, address));
+
+async function cancelQuietly(db, checkoutId) {
+  if (!checkoutId) return;
+  try {
+    await asaasClient().cancelCheckout(checkoutId);
+  } catch (err) {
+    logger.error('startMedalCheckout: não cancelou o checkout', { checkoutId, err: safeErr(err) });
+  }
+  await db.doc('checkouts/' + checkoutId).set({ status: 'canceled' }, { merge: true }).catch(() => {});
+}
+
+// Conclusão conferida nos treinos marcados (posts), nunca no marcador users.concluded.
+async function concludedByPosts(db, uid) {
+  const posts = await db.collection('posts').where('uid', '==', uid).get();
+  const marks = {};
+  posts.forEach((p) => {
+    const d = p.data();
+    if (d.at && typeof d.at.toMillis === 'function') marks[d.w + '-' + d.d] = d.at.toMillis();
+  });
+  return core.isConcluded(marks);
+}
+
+async function startMedalCheckout(request) {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Entre com seu e-mail e senha.');
+  const uid = request.auth.uid;
+  const d = request.data && typeof request.data === 'object' ? request.data : {};
+  const db = getFirestore();
+
+  const [user, profileSnap, medalSnap] = await Promise.all([
+    db.doc('users/' + uid).get(), db.doc(`users/${uid}/private/profile`).get(), db.doc(`users/${uid}/private/medal`).get(),
+  ]);
+  if (!user.exists || user.get('access') !== 'active') throw new HttpsError('failed-precondition', MSG_NOT_ELIGIBLE);
+  if (!(await concludedByPosts(db, uid))) throw new HttpsError('failed-precondition', MSG_NOT_ELIGIBLE);
+
+  const profile = profileSnap.exists ? profileSnap.data() : null;
+  let address;
+  if (d.useSignupAddress === true) {
+    address = core.cleanAddress(profile && profile.address);
+    if (!address) throw new HttpsError('invalid-argument', MSG_ADDRESS);
+  } else {
+    address = core.cleanAddress(d.address);
+    if (!address) throw new HttpsError('invalid-argument', MSG_ADDRESS);
+  }
+
+  const medal = medalSnap.exists ? medalSnap.data() : null;
+  if (medal && PAID.includes(medal.status)) throw new HttpsError('failed-precondition', MSG_TAKEN);
+  if (medal && (medal.refundCount || 0) >= REFUND_LIMIT) throw new HttpsError('failed-precondition', MSG_LIMIT);
+  if (reusable(medal, address)) return { checkoutUrl: medal.url };
+
+  const customerData = customerDataOf(user.get('name'), profile, address);
+  const value = Number(MEDAL_PRICE.value());
+  let checkout;
+  try {
+    checkout = await asaasClient().createCheckout(medalCheckoutArgs(uid, customerData));
+  } catch (err) {
+    logger.error('startMedalCheckout: Asaas falhou ao criar o checkout', { uid, status: err && err.status, err: safeErr(err) });
+    throw new HttpsError('unavailable', MSG_UNAVAILABLE);
+  }
+  const expiresAt = Timestamp.fromDate(new Date(checkout.expiresAt));
+  const medalRef = db.doc(`users/${uid}/private/medal`);
+  const outcome = await db.runTransaction(async (tx) => {
+    const cur = await tx.get(medalRef);
+    const c = cur.exists ? cur.data() : null;
+    if (c && PAID.includes(c.status)) return { taken: true };
+    if (c && (c.refundCount || 0) >= REFUND_LIMIT) return { limit: true };
+    // Outra chamada ganhou a corrida com um checkout novo e igual: fica com o dela.
+    if (reusable(c, address) && c.checkoutId !== (medal && medal.checkoutId)) return { url: c.url, dup: true };
+    tx.set(db.doc('checkouts/' + checkout.id), {
+      kind: 'medal', uid, value, createdAt: FieldValue.serverTimestamp(), expiresAt, status: 'active',
+    });
+    tx.set(medalRef, {
+      status: 'pending', address, checkoutId: checkout.id, url: checkout.url, expiresAt,
+      refundCount: (c && c.refundCount) || 0, updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return { url: checkout.url };
+  });
+  if (outcome.taken || outcome.limit || outcome.dup) {
+    await cancelQuietly(db, checkout.id);
+    if (outcome.taken) throw new HttpsError('failed-precondition', MSG_TAKEN);
+    if (outcome.limit) throw new HttpsError('failed-precondition', MSG_LIMIT);
+    return { checkoutUrl: outcome.url };
+  }
+  // O checkout pendente anterior (vencido ou de outro endereço) deixa de valer.
+  if (medal && medal.status === 'pending' && medal.checkoutId) await cancelQuietly(db, medal.checkoutId);
+  return { checkoutUrl: outcome.url };
+}
+
+module.exports = { startMedalCheckout };
