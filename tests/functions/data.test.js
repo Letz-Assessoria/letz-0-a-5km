@@ -70,6 +70,17 @@ describe('functions de dados', () => {
     await db.doc('posts/ana_10-1').delete();
     await waitFor(async () => (await db.doc('users/ana').get()).get('concluded') === false);
   });
+  it('points: post da medalha (sem w/d) não conta pontos, done nem conclusão', async () => {
+    await mkUser('ana');
+    await db.doc('posts/ana_medal').set({
+      uid: 'ana', medal: true, at: Timestamp.fromMillis(START + HOUR), handle: 'ana', name: 'Nome ana',
+      photoURL: '', hidden: false, authorActive: true, rc: {},
+    });
+    await new Promise((r) => setTimeout(r, 1000));
+    for (let d = 0; d < 3; d++) await mkPost('ana', 1, d, START + (d + 1) * HOUR);
+    const u = await waitFor(userIs('ana', 9, 3));
+    assert.notEqual(u.concluded, true);
+  });
   it('points: apagar um post recalcula', async () => {
     await mkUser('ana');
     for (let d = 0; d < 3; d++) await mkPost('ana', 1, d, START + (d + 1) * HOUR);

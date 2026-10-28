@@ -3612,7 +3612,7 @@ var stops=[],cmSubs={},rxLoading={},dataRole='';
 function softRender(){if(V.view!=='athlete'&&V.view!=='admin')return;var y=window.scrollY,ae=document.activeElement,id=ae&&ae.id,ss=null,se=null;try{ss=ae.selectionStart;se=ae.selectionEnd;}catch(e){}
  render();window.scrollTo(0,y);if(id){var el=document.getElementById(id);if(el){el.focus({preventScroll:true});try{if(ss!==null)el.setSelectionRange(ss,se);}catch(e){}}}}
 function resetData(){V.tdraft={};V.cd=null;V.cdirty=false;V.tsaved=false;V.csaved=false;V.cli=null;V.fq='';stops.forEach(function(f){try{f();}catch(e){}});stops=[];for(var id in cmSubs)cmSubs[id]();cmSubs={};rxLoading={};dataRole='';S=newS();}
-function syncMine(){var m={},c={},ph={};S.mine.forEach(function(p){var k=p.w+'-'+p.d;m[k]=p.at;if(p.comment)c[k]=p.comment;if(p.imgURL)ph[k]=p.imgURL;});S.marks=m;S.comments=c;S.wphotos=ph;}
+function syncMine(){var m={},c={},ph={};S.mine.forEach(function(p){if(p.medal)return;var k=p.w+'-'+p.d;m[k]=p.at;if(p.comment)c[k]=p.comment;if(p.imgURL)ph[k]=p.imgURL;});S.marks=m;S.comments=c;S.wphotos=ph;}
 function applyCfg(c){var cf=S.cfg;if(c){if(c.start)S.start=c.start;S.texts=c.texts||{};S.videos=Array.isArray(c.videos)?c.videos:null;S.salesOpen=c.salesOpen!==false;
   ['av','wa','grupo'].forEach(function(k){if(k in c)cf[k]=c[k]||'';});if(Number(c.frete)>0)cf.frete=Number(c.frete);var px=c.pix||{};['chave','pnome','pcidade'].forEach(function(k){cf[k]=px[k]||'';});}
  softRender();}

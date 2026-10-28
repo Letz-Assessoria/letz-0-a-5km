@@ -6,6 +6,7 @@ const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestor
 const core = require('../shared/core.js');
 const { asaasClient, medalCheckoutArgs, customerDataOf, MEDAL_PRICE } = require('./billing-config.js');
 const { safeErr } = require('./safe.js');
+const { marksFromPosts } = require('./points.js');
 
 const MSG_ADDRESS = 'Confira o endereço: CEP, rua, número, bairro, cidade e estado.';
 const MSG_NOT_ELIGIBLE = 'A medalha é para quem concluiu o programa.';
@@ -34,12 +35,7 @@ async function cancelQuietly(db, checkoutId) {
 // Conclusão conferida nos treinos marcados (posts), nunca no marcador users.concluded.
 async function concludedByPosts(db, uid) {
   const posts = await db.collection('posts').where('uid', '==', uid).get();
-  const marks = {};
-  posts.forEach((p) => {
-    const d = p.data();
-    if (d.at && typeof d.at.toMillis === 'function') marks[d.w + '-' + d.d] = d.at.toMillis();
-  });
-  return core.isConcluded(marks);
+  return core.isConcluded(marksFromPosts(posts));
 }
 
 async function startMedalCheckout(request) {
