@@ -1,7 +1,7 @@
 rules_version = '2';
 
 // Regras do Storage do "Do 0 aos 5 km".
-// Caminhos: avatars/{uid}.jpg e workouts/{uid}/{w}-{d}.jpg.
+// Caminhos: avatars/{uid}.jpg, workouts/{uid}/{w}-{d}.jpg e workouts/{uid}/medal.jpg.
 // Dono escreve (só image/jpeg, < 2 MB); lê quem está ativo (consulta o Firestore) ou o treinador.
 service firebase.storage {
   match /b/{bucket}/o {
@@ -26,13 +26,19 @@ service firebase.storage {
     }
 
     match /workouts/{uid}/{file} {
+      // Foto do treino ({w}-{d}.jpg) ou da medalha (medal.jpg, só com o pedido enviado).
+      function medalShipped() {
+        let p = /databases/(default)/documents/users/$(request.auth.uid)/private/medal;
+        return firestore.exists(p) && firestore.get(p).data.status in ['shipped', 'delivered'];
+      }
       function mine() {
         return signedIn() && uid == request.auth.uid
-          && file.matches('^([1-9]|10)-[0-2][.]jpg$');
+          && (file.matches('^([1-9]|10)-[0-2][.]jpg$') || (file == 'medal.jpg' && medalShipped()));
       }
       allow read: if canRead();
       allow create, update: if mine() && imageOk();
-      allow delete: if mine();
+      allow delete: if signedIn() && uid == request.auth.uid
+        && (file.matches('^([1-9]|10)-[0-2][.]jpg$') || file == 'medal.jpg');
     }
   }
 }
