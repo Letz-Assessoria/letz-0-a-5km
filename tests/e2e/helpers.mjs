@@ -182,3 +182,8 @@ export async function storageObject(path, bucket = 'demo-letz.appspot.com') {
   });
   return res.ok ? res.json() : null;
 }
+
+// Aparelho que já viu o guia de instalação (o guia aparece uma vez por aparelho depois da compra).
+export async function skipGuide(page) {
+  await page.addInitScript(() => { try { localStorage.setItem('letz.installGuideSeen', '1'); } catch (e) {} });
+}
