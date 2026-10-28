@@ -44,7 +44,7 @@ test('medalha: R$ 35,00 de frete pago no fim, Pix ou cartão à vista, sem resto
 
 test('FAQ: reembolso do programa, da medalha e recompra batem com o fluxo', async ({ page }) => {
   await page.goto('/');
-  const texto = await page.locator('body').innerText();
+  const texto = await page.locator('body').textContent();
   expect(texto).toContain('Você tem 7 dias a partir da compra do programa');
   expect(texto).toContain('pelo WhatsApp da assessoria');
   expect(texto).toContain('só antes de ser enviada');
