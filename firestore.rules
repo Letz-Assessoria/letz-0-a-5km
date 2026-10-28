@@ -20,7 +20,7 @@ service cloud.firestore {
     // acrescenta o host do emulador; esta regra NÃO o aceita.
     function imgUrlOk(v) {
       return v is string && v.size() <= 2048 && (v == ''
-        || v.matches('^https://firebasestorage[.]googleapis[.]com/v0/b/.*'));
+        || v.matches('^https://firebasestorage[.]googleapis[.]com/v0/b/letz-0-aos-5km(-dev)?[.]firebasestorage[.]app/o/.*'));
     }
     // Se o handle foi criado ou trocado, a reserva handles/{novo} do próprio uid
     // tem que existir ao fim da mesma transação/batch.
