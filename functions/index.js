@@ -9,7 +9,7 @@ const points = require('./src/points.js');
 const propagate = require('./src/propagate.js');
 const reactions = require('./src/reactions.js');
 const { onCall, onRequest } = require('firebase-functions/v2/https');
-const { ASAAS_API_KEY, ASAAS_WEBHOOK_TOKEN } = require('./src/billing-config.js');
+const { ASAAS_API_KEY, ASAAS_WEBHOOK_TOKEN, GMAIL_APP_PASSWORD } = require('./src/billing-config.js');
 const signup = require('./src/signup.js');
 const partners = require('./src/partners.js');
 const medal = require('./src/medal.js');
@@ -25,12 +25,9 @@ exports.resumeCheckout = onCall({ secrets: [ASAAS_API_KEY] }, signup.resumeCheck
 exports.rebuyProgram = onCall({ secrets: [ASAAS_API_KEY] }, signup.rebuyProgram);
 exports.requestRefund = onCall(medal.requestRefund);
 exports.startMedalCheckout = onCall({ secrets: [ASAAS_API_KEY] }, medal.startMedalCheckout);
-// E-mail de envio: o envio real precisa do secret GMAIL_APP_PASSWORD (billing-config.js). Ele ainda NÃO
-// está em `secrets` abaixo porque não foi criado (o deploy falharia); sem ele, fora do emulador, o mailer devolve sent:false (not-configured) e o envio vira alerta medal-email-failed.
-// Para ligar: firebase functions:secrets:set GMAIL_APP_PASSWORD e acrescentar `secrets: [GMAIL_APP_PASSWORD]`
-// a updateMedalOrder e resendMedalEmail.
-exports.updateMedalOrder = onCall(medal.updateMedalOrder);
-exports.resendMedalEmail = onCall(medal.resendMedalEmail);
+// E-mail de envio da medalha: sai de letzassessoria@gmail.com com a senha de app no secret GMAIL_APP_PASSWORD.
+exports.updateMedalOrder = onCall({ secrets: [GMAIL_APP_PASSWORD] }, medal.updateMedalOrder);
+exports.resendMedalEmail = onCall({ secrets: [GMAIL_APP_PASSWORD] }, medal.resendMedalEmail);
 exports.createPartner = onCall(partners.createPartner);
 exports.createCoupon = onCall(partners.createCoupon);
 exports.asaasWebhook = onRequest({ secrets: [ASAAS_WEBHOOK_TOKEN] }, webhook.asaasWebhook);
