@@ -24,7 +24,8 @@ Fontes: revisão final do PR #2, revisão da Task 12, revisões de segurança au
 - [ ] **Checkout duplicado.** Pago no checkout A enquanto `billing.checkoutId` é B: cancelar B depois da transação (`cancelCheckoutQuietly`) (M2).
 - [ ] **"Ainda não paguei" em `#/confirmando`.** Não substituir um checkout com menos de 60 minutos; janela pequena de pagamento duplicado nos 5 últimos minutos (M3). O flag `duplicate` já cobre.
 - [ ] **Falha isolada de `payments`.** Hoje um erro ao montar a linha só vai para o log. Se quiser mais garantia, escrever fora da transação e testar uma falha forçada.
-- [x] **Reembolso parcial:** gera alerta no painel (`partial-refund`), sem bloquear (PR #7). Falta confirmar o corpo real do evento `PAYMENT_PARTIALLY_REFUNDED` num reembolso parcial feito depois da assinatura.
+- [x] **Reembolso parcial (Parte 3):** reembolso parcial e chargeback da medalha também geram alerta no painel (`medal-partial-refund`, `medal-refunded-shipped`); reembolso total antes do envio devolve o pedido a "Reembolsado" e permite recompra. Antes disso: gera alerta no painel (`partial-refund`), sem bloquear (PR #7). Falta confirmar o corpo real do evento `PAYMENT_PARTIALLY_REFUNDED` num reembolso parcial feito depois da assinatura.
+- [x] **Estorno (Parte 3):** pedido de reembolso do programa (7 dias) e da medalha (antes do envio) pelo WhatsApp da assessoria, limite de uma recompra (`refundCount`) e callable `rebuyProgram`. O reembolso em si continua manual no Asaas.
 - [ ] **Chargeback ganho** (reversão) não é tratado sozinho (M16). O treinador usa "Liberar acesso". Documentar para o treinador.
 
 ## 3. Painel do treinador
@@ -47,10 +48,24 @@ Fontes: revisão final do PR #2, revisão da Task 12, revisões de segurança au
 
 ## 5. Próximas partes do produto
 
-- [ ] **Parte 3: pagamento da medalha.** Segundo checkout no fim do programa, mais o envio. Decisões abertas: preço, acréscimo no cartão (o Asaas só repassa taxa em link criado no painel), quando abre e quem paga o frete. Começa com brainstorm e spec.
+- [x] **Parte 3: pagamento da medalha.** Checkout Asaas de R$ 35,00 (Pix ou cartão à vista), controle de envio no painel, e-mail de envio, post no feed, reembolso e recompra. Ver `docs/superpowers/specs/2026-10-28-parte3-medalha-design.md`.
 - [ ] **Parte 4: textos e conteúdo.** Troca dos textos que ainda citam Kiwify e demais ajustes. O mínimo (política com Asaas, CPF e celular) já foi.
 - [ ] **Produto sem turma.** Depois de validar a primeira turma, trocar o início fixo da turma por início por aluno.
 - [ ] **Domínio próprio.** Hoje `letz-0-aos-5km.web.app`. Se mudar, atualizar `APP_URL`, URL de retorno do Asaas e domínios autorizados do Auth.
+
+## 5b. Pendências que ficaram da Parte 3
+
+- [ ] **Checkout órfão em `rebuyProgram`.** Duas chamadas simultâneas podem abrir dois checkouts do programa; o segundo fica órfão no Asaas (o duplicado pago só gera alerta).
+- [ ] **Checkout da medalha sem `checkouts/{id}` confiável (revisão final M-4).** Se a transação de `startMedalCheckout` falha depois de `createCheckout`, o checkout fica ativo no Asaas sem documento; e o `cancelQuietly` grava `checkouts/{id}` só com `status: canceled`, sem `kind` nem `uid`. Um pagamento desses cairia no ramo do programa. Tratar com `try/catch` + cancelamento, gravar `kind`/`uid`/`value` no cancelado e, no ramo do programa, recusar `paid` sem `checkouts/{id}` de valor diferente de `PROGRAM_PRICE` (com alerta). Sem remendo agora: o aluno não recebe a URL nesses casos.
+- [ ] **Duas chamadas simultâneas de `startMedalCheckout` com endereços diferentes (M-5).** A segunda sobrescreve o pedido e o checkout da primeira não é cancelado; se for pago, `medal.address` fica com o endereço da segunda. Cancelar também o checkout sobrescrito dentro da transação.
+- [ ] **Preço da medalha fixo no cliente (M-8).** `MEDAL_PRICE='R$ 35,00'` em `public/index.html` não acompanha o parâmetro do servidor; devolver o preço pela callable ou por `config/app`.
+- [ ] **Contas reembolsadas antes do contador `refundCount`.** Ausente conta como 0 (documentado em `startMedalCheckout`); se existir conta antiga reembolsada em produção, gravar `refundCount: 1` à mão.
+- [ ] **Lista de concluídos e escala do painel.** A aba Medalhas lê um listener de `private/medal` por aluno concluído; para turmas grandes, guardar o resumo em `users/{uid}` ou paginar.
+- [ ] **Status da medalha em Atletas.** A aba Atletas mostra só a marca de reembolso; falta o status do pedido (pago, enviado, entregue) por aluno.
+- [ ] **Foto órfã no storage.** Foto anexada a um post de medalha ou de treino que não é publicado (ou é apagado) fica no Storage sem referência; falta uma limpeza.
+- [ ] **Notificações e câmera do PWA.** Aviso push de medalha enviada e de reembolso, e abrir a câmera direto ao anexar foto.
+- [ ] **Guia de instalação pós-compra.** Levar o aluno recém-pago à tela de instalar o app (`#/instalar`) em vez de só mostrá-la antes do login.
+- [ ] **Vídeos do YouTube embutidos e agendador de liberação.** Vídeos de apoio com player embutido, e liberação agendada de semanas e vídeos.
 
 ## 6. Operação
 

@@ -53,28 +53,10 @@ service cloud.firestore {
           && changed().hasOnly(['access', 'points', 'done'])
           && request.resource.data.access in ['pending', 'active', 'blocked']);
 
-      // private/profile e private/billing: só Functions escrevem.
+      // private/profile, billing e medal: só Functions escrevem (aluno e treinador leem).
       match /private/{docId} {
         allow read: if isOwner(uid) || isAdmin();
         allow write: if false;
-      }
-
-      // private/ship: aluno grava o endereço; treinador, paidAt/track.
-      match /private/ship {
-        function addrKeys() {
-          return ['nome', 'cep', 'rua', 'num', 'comp', 'bairro', 'cidade', 'uf', 'tel', 'at'];
-        }
-        function atOk() {
-          return !('at' in request.resource.data) || request.resource.data.at == request.time
-            || (resource != null && 'at' in resource.data && request.resource.data.at == resource.data.at);
-        }
-        allow read: if isOwner(uid) || isAdmin();
-        allow create: if isOwner(uid)
-          && request.resource.data.keys().hasOnly(addrKeys()) && atOk();
-        allow update: if
-          (isOwner(uid) && changed().hasOnly(addrKeys()) && atOk())
-          || (isAdmin() && changed().hasOnly(['paidAt', 'track']));
-        allow delete: if false;
       }
     }
 
@@ -145,13 +127,15 @@ service cloud.firestore {
     }
 
     match /posts/{postId} {
-      // comment, photoPath e imgURL: tipos e formatos. uid/w/d vêm do próprio post.
-      function contentOk(p, uid, w, d) {
+      // comment, photoPath e imgURL: tipos e formatos. `path` é o único photoPath aceito
+      // (além do vazio): o do treino {w}-{d} ou o da medalha.
+      function contentOk(p, path) {
         return (!('comment' in p) || (p.comment is string && p.comment.size() <= 1000))
-          && (!('photoPath' in p) || p.photoPath == ''
-              || p.photoPath == 'workouts/' + uid + '/' + string(w) + '-' + string(d) + '.jpg')
+          && (!('photoPath' in p) || p.photoPath == '' || p.photoPath == path)
           && (!('imgURL' in p) || imgUrlOk(p.imgURL));
       }
+      function workoutPath(uid, w, d) { return 'workouts/' + uid + '/' + string(w) + '-' + string(d) + '.jpg'; }
+      function medalPath(uid) { return 'workouts/' + uid + '/medal.jpg'; }
       function newPostOk() {
         let p = request.resource.data;
         let u = myProfile();
@@ -167,16 +151,38 @@ service cloud.firestore {
           && p.hidden == false
           && p.authorActive == true
           && (!('rc' in p) || p.rc == {})
-          && contentOk(p, p.uid, p.w, p.d)
+          && contentOk(p, workoutPath(p.uid, p.w, p.d))
           && weekOpen(p.w);
+      }
+      // Post da medalha: id {uid}_medal (um por aluno), sem w/d (não conta pontos) e só
+      // com o pedido já enviado. O pedido é lido de users/{uid}/private/medal (só Functions escrevem).
+      function medalPostOk() {
+        let p = request.resource.data;
+        let u = myProfile();
+        let order = /databases/$(database)/documents/users/$(request.auth.uid)/private/medal;
+        return p.keys().hasAll(['uid', 'handle', 'name', 'photoURL', 'at', 'hidden', 'authorActive', 'medal'])
+          && p.keys().hasOnly(['uid', 'handle', 'name', 'photoURL', 'at', 'comment', 'photoPath',
+                               'imgURL', 'hidden', 'authorActive', 'rc', 'medal'])
+          && p.medal == true
+          && p.uid == request.auth.uid
+          && p.handle == u.handle && p.name == u.name && p.photoURL == u.photoURL
+          && postId == request.auth.uid + '_medal'
+          && p.at == request.time
+          && p.hidden == false
+          && p.authorActive == true
+          && (!('rc' in p) || p.rc == {})
+          && contentOk(p, medalPath(p.uid))
+          && exists(order) && get(order).data.status in ['shipped', 'delivered'];
       }
 
       allow read: if isActive() || isAdmin();
-      allow create: if isActive() && newPostOk();
+      allow create: if isActive() && (newPostOk() || medalPostOk());
       allow update: if
         (isActive() && resource.data.uid == request.auth.uid
           && changed().hasOnly(['comment', 'photoPath', 'imgURL'])
-          && contentOk(request.resource.data, resource.data.uid, resource.data.w, resource.data.d))
+          && contentOk(request.resource.data, resource.data.get('medal', false) == true
+               ? medalPath(resource.data.uid)
+               : workoutPath(resource.data.uid, resource.data.w, resource.data.d)))
         || (isAdmin() && changed().hasOnly(['hidden']) && request.resource.data.hidden is bool);
       allow delete: if signedIn() && resource.data.uid == request.auth.uid;
 

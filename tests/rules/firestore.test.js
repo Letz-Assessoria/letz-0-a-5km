@@ -109,13 +109,24 @@ describe('firestore.rules', () => {
     await seed(async (f) => {
       await setDoc(doc(f, `users/${BOB}/private/profile`), { email: 'b@x.com', cpf: '123', phone: '9' });
       await setDoc(doc(f, `users/${BOB}/private/billing`), { status: 'paid' });
-      await setDoc(doc(f, `users/${BOB}/private/ship`), { nome: 'Bob', cep: '1' });
+      await setDoc(doc(f, `users/${BOB}/private/medal`), { status: 'paid' });
     });
-    for (const p of ['profile', 'billing', 'ship']) {
+    for (const p of ['profile', 'billing', 'medal']) {
       await assertFails(getDoc(doc(db(ALICE), `users/${BOB}/private/${p}`)));
       await assertSucceeds(getDoc(doc(db(BOB), `users/${BOB}/private/${p}`)));
       await assertSucceeds(getDoc(doc(adminDb(), `users/${BOB}/private/${p}`)));
     }
+  });
+
+  it('private/medal: cliente não escreve (nem o dono nem o treinador)', async () => {
+    const ref = (c) => doc(c, `users/${ALICE}/private/medal`);
+    await assertFails(setDoc(ref(db(ALICE)), { status: 'shipped' }));
+    await assertFails(setDoc(ref(adminDb()), { status: 'shipped' }));
+    await seed((f) => setDoc(ref(f), { status: 'paid' }));
+    await assertFails(updateDoc(ref(db(ALICE)), { status: 'shipped' }));
+    await assertFails(updateDoc(ref(adminDb()), { status: 'shipped' }));
+    await assertFails(deleteDoc(ref(db(ALICE))));
+    await assertFails(getDoc(ref(anonDb())));
   });
 
   it('private/profile e billing: cliente não escreve', async () => {
@@ -123,19 +134,6 @@ describe('firestore.rules', () => {
     await assertFails(setDoc(doc(db(ALICE), `users/${ALICE}/private/billing`), { status: 'paid' }));
     await assertFails(setDoc(doc(adminDb(), `users/${ALICE}/private/billing`), { status: 'paid' }));
     await assertFails(setDoc(doc(db(ALICE), `users/${ALICE}/private/outro`), { x: 1 }));
-  });
-
-  it('ship: aluno escreve endereço mas não paidAt/track; treinador escreve paidAt/track', async () => {
-    const ref = doc(db(ALICE), `users/${ALICE}/private/ship`);
-    const addr = { nome: 'Alice', cep: '50000-000', rua: 'Rua A', num: '1', comp: '', bairro: 'B', cidade: 'Recife', uf: 'PE', tel: '81999999999', at: serverTimestamp() };
-    await assertSucceeds(setDoc(ref, addr));
-    await assertSucceeds(updateDoc(ref, { num: '2' }));
-    await assertFails(updateDoc(ref, { paidAt: serverTimestamp() }));
-    await assertFails(updateDoc(ref, { track: 'BR123' }));
-    await assertFails(setDoc(doc(db(BOB), `users/${ALICE}/private/ship`), addr));
-    const aref = doc(adminDb(), `users/${ALICE}/private/ship`);
-    await assertSucceeds(updateDoc(aref, { paidAt: serverTimestamp(), track: 'BR123' }));
-    await assertFails(updateDoc(aref, { rua: 'Outra' }));
   });
 
   it('users: trocar handle sem reservar handles/ é negado', async () => {
@@ -452,5 +450,90 @@ describe('firestore.rules', () => {
     // aluno ativo lê o feed; pendente não
     await assertSucceeds(getDocs(collection(db(ALICE), 'posts')));
     await assertFails(getDocs(collection(db(PETE), 'posts')));
+  });
+
+  describe('post da medalha', () => {
+    const medalId = (uid) => `${uid}_medal`;
+    const medalPost = (uid, extra = {}) => ({
+      uid, handle: uid, name: uid, photoURL: '', at: serverTimestamp(),
+      comment: '', photoPath: '', imgURL: '', hidden: false, authorActive: true, rc: {}, medal: true,
+      ...extra,
+    });
+    const seedMedal = (uid, status) => seed((f) => setDoc(doc(f, `users/${uid}/private/medal`), { status }));
+
+    it('dono cria com pedido shipped ou delivered', async () => {
+      await seedMedal(ALICE, 'shipped');
+      await assertSucceeds(setDoc(doc(db(ALICE), 'posts', medalId(ALICE)), medalPost(ALICE)));
+      await seedMedal(BOB, 'delivered');
+      await assertSucceeds(setDoc(doc(db(BOB), 'posts', medalId(BOB)), medalPost(BOB)));
+    });
+
+    it('recusa com pedido paid, pending, refunded ou sem pedido', async () => {
+      for (const status of ['paid', 'pending', 'refunded']) {
+        await seedMedal(ALICE, status);
+        await assertFails(setDoc(doc(db(ALICE), 'posts', medalId(ALICE)), medalPost(ALICE)));
+      }
+      await assertFails(setDoc(doc(db(BOB), 'posts', medalId(BOB)), medalPost(BOB)));
+    });
+
+    it('recusa pedido de outro aluno, id errado, pendente e sem medal:true', async () => {
+      await seedMedal(ALICE, 'shipped');
+      await seedMedal(PETE, 'shipped');
+      await assertFails(setDoc(doc(db(BOB), 'posts', medalId(ALICE)), medalPost(ALICE)));
+      await assertFails(setDoc(doc(db(BOB), 'posts', medalId(BOB)), medalPost(ALICE)));
+      await assertFails(setDoc(doc(db(ALICE), 'posts', 'qualquer'), medalPost(ALICE)));
+      await assertFails(setDoc(doc(db(PETE), 'posts', medalId(PETE)), medalPost(PETE)));
+      await assertFails(setDoc(doc(db(ALICE), 'posts', medalId(ALICE)), medalPost(ALICE, { medal: false })));
+    });
+
+    it('sem w/d, sem pontos, sem campos extras e com hidden/rc/authorActive iniciais', async () => {
+      await seedMedal(ALICE, 'shipped');
+      const ref = doc(db(ALICE), 'posts', medalId(ALICE));
+      await assertFails(setDoc(ref, medalPost(ALICE, { w: 1, d: 0 })));
+      await assertFails(setDoc(ref, medalPost(ALICE, { points: 99 })));
+      await assertFails(setDoc(ref, medalPost(ALICE, { hidden: true })));
+      await assertFails(setDoc(ref, medalPost(ALICE, { authorActive: false })));
+      await assertFails(setDoc(ref, medalPost(ALICE, { rc: { fire: 50 } })));
+      await assertFails(setDoc(ref, medalPost(ALICE, { handle: 'outro' })));
+      await assertFails(setDoc(ref, medalPost(ALICE, { at: Timestamp.fromMillis(1) })));
+    });
+
+    it('um por aluno: segundo create do mesmo id é negado', async () => {
+      await seedMedal(ALICE, 'shipped');
+      await assertSucceeds(setDoc(doc(db(ALICE), 'posts', medalId(ALICE)), medalPost(ALICE)));
+      await assertFails(setDoc(doc(db(ALICE), 'posts', medalId(ALICE)), medalPost(ALICE, { comment: 'de novo' })));
+    });
+
+    it('comment, imgURL do bucket e photoPath da medalha; o resto é recusado', async () => {
+      await seedMedal(ALICE, 'delivered');
+      const ref = doc(db(ALICE), 'posts', medalId(ALICE));
+      await assertFails(setDoc(ref, medalPost(ALICE, { comment: 'x'.repeat(1001) })));
+      await assertFails(setDoc(ref, medalPost(ALICE, { imgURL: 'https://evil.example/x.jpg' })));
+      await assertFails(setDoc(ref, medalPost(ALICE, { photoPath: `workouts/${ALICE}/1-0.jpg` })));
+      await assertFails(setDoc(ref, medalPost(ALICE, { photoPath: `workouts/${BOB}/medal.jpg` })));
+      await assertSucceeds(setDoc(ref, medalPost(ALICE, {
+        comment: 'Consegui!', imgURL: FS_URL, photoPath: `workouts/${ALICE}/medal.jpg`,
+      })));
+    });
+
+    it('dono edita comment/photoPath/imgURL e apaga; não mexe em hidden; treinador esconde', async () => {
+      await seedMedal(ALICE, 'shipped');
+      await assertSucceeds(setDoc(doc(db(ALICE), 'posts', medalId(ALICE)), medalPost(ALICE)));
+      const ref = doc(db(ALICE), 'posts', medalId(ALICE));
+      await assertSucceeds(updateDoc(ref, { comment: 'Bom', photoPath: `workouts/${ALICE}/medal.jpg`, imgURL: FS_URL }));
+      await assertFails(updateDoc(ref, { photoPath: `workouts/${ALICE}/1-0.jpg` }));
+      await assertFails(updateDoc(ref, { hidden: true }));
+      await assertFails(updateDoc(doc(db(BOB), 'posts', medalId(ALICE)), { comment: 'hack' }));
+      await assertSucceeds(updateDoc(doc(adminDb(), 'posts', medalId(ALICE)), { hidden: true }));
+      await assertSucceeds(deleteDoc(ref));
+    });
+
+    it('post de treino continua exigindo w e d válidos', async () => {
+      const a = db(ALICE);
+      await assertFails(setDoc(doc(a, 'posts', `${ALICE}_1-0`), newPost(ALICE, 1, 0, { medal: true })));
+      const { w, ...semW } = newPost(ALICE, 1, 0);
+      await assertFails(setDoc(doc(a, 'posts', `${ALICE}_1-0`), semW));
+      await assertFails(setDoc(doc(a, 'posts', `${ALICE}_1-3`), newPost(ALICE, 1, 3)));
+    });
   });
 });

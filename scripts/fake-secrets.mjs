@@ -4,6 +4,6 @@ import { existsSync, writeFileSync } from 'node:fs';
 
 const file = new URL('../functions/.secret.local', import.meta.url);
 if (!existsSync(file)) {
-  writeFileSync(file, 'ASAAS_API_KEY=chave-falsa-do-emulador\nASAAS_WEBHOOK_TOKEN=token-falso-do-emulador\n');
+  writeFileSync(file, 'ASAAS_API_KEY=chave-falsa-do-emulador\nASAAS_WEBHOOK_TOKEN=token-falso-do-emulador\nGMAIL_APP_PASSWORD=senha-falsa-do-emulador\n');
   console.log('functions/.secret.local criado com valores falsos');
 }

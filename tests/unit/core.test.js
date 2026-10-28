@@ -26,12 +26,16 @@ test('weekIndex nunca é negativo', () => {
   assert.equal(weekIndex(start, start - 5), 0);
   assert.equal(weekIndex(start, start + WEEK_MS), 1);
 });
-test('isConcluded exige 24 marcações e a "10-2"', () => {
-  const m = {};
-  for (let i = 0; i < 24; i++) m['k' + i] = 1;
-  assert.equal(isConcluded(m), false);
-  delete m.k0; m['10-2'] = 1;
-  assert.equal(isConcluded(m), true);
+test('isConcluded exige 24 marcações e as três finais 10-0, 10-1, 10-2', () => {
+  const base = () => { const m = {}; for (let i = 0; i < 21; i++) m['k' + i] = 1; return m; };
+  const full = base(); full['10-0'] = 1; full['10-1'] = 1; full['10-2'] = 1;
+  assert.equal(isConcluded(full), true);
+  const semZero = base(); semZero['10-1'] = 1; semZero['10-2'] = 1; semZero.x1 = 1;
+  assert.equal(isConcluded(semZero), false);
+  const curto = {}; for (let i = 0; i < 20; i++) curto['k' + i] = 1;
+  curto['10-0'] = 1; curto['10-1'] = 1; curto['10-2'] = 1;
+  assert.equal(isConcluded(curto), false);
+  assert.equal(isConcluded({}), false);
 });
 test('CPF', () => {
   assert.equal(isValidCpf('529.982.247-25'), true);

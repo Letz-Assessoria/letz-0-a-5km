@@ -79,4 +79,25 @@ describe('storage.rules', () => {
     await assertFails(getBytes(ref(env.unauthenticatedContext().storage(), 'avatars/bob.jpg')));
     await assertSucceeds(getBytes(ref(adminSt(), 'workouts/bob/1-0.jpg')));
   });
+
+  it('storage: medal.jpg só com o pedido da medalha shipped ou delivered', async () => {
+    const medal = (uid) => ref(st(uid), `workouts/${uid}/medal.jpg`);
+    const setStatus = (uid, status) => env.withSecurityRulesDisabled(
+      (ctx) => setDoc(doc(ctx.firestore(), `users/${uid}/private/medal`), { status }));
+    await assertFails(uploadBytes(medal('alice'), bytes(10 * KB), jpeg));
+    for (const status of ['pending', 'paid', 'refunded']) {
+      await setStatus('alice', status);
+      await assertFails(uploadBytes(medal('alice'), bytes(10 * KB), jpeg));
+    }
+    await setStatus('alice', 'shipped');
+    await assertSucceeds(uploadBytes(medal('alice'), bytes(200 * KB), jpeg));
+    await assertFails(uploadBytes(medal('alice'), bytes(3 * 1024 * KB), jpeg));
+    await assertFails(uploadBytes(medal('alice'), bytes(10 * KB), { contentType: 'image/png' }));
+    await assertFails(uploadBytes(ref(st('bob'), 'workouts/alice/medal.jpg'), bytes(10 * KB), jpeg));
+    await setStatus('bob', 'delivered');
+    await assertSucceeds(uploadBytes(ref(st('bob'), 'workouts/bob/medal.jpg'), bytes(10 * KB), jpeg));
+    await assertSucceeds(getBytes(ref(st('alice'), 'workouts/bob/medal.jpg')));
+    await assertFails(getBytes(ref(st('pete'), 'workouts/bob/medal.jpg')));
+    await assertSucceeds(deleteObject(medal('alice')));
+  });
 });

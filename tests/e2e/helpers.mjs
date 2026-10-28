@@ -107,14 +107,14 @@ export async function clearRateLimits() {
   await db.recursiveDelete(db.collection('rateLimits'));
 }
 
-// Aluno com 24 treinos incluindo o 10-2 (medalha liberada), gravados pelo Admin SDK.
+// Aluno que concluiu: 24 treinos incluindo 10-0, 10-1 e 10-2 (medalha liberada), gravados pelo Admin SDK.
 export async function seedConcluded(u) {
   const keys = [];
   for (let w = 1; w <= 7; w++) for (let d = 0; d < 3; d++) keys.push([w, d]);
-  keys.push([8, 0], [8, 1], [10, 2], [9, 0], [9, 1], [9, 2]);
+  keys.push([10, 0], [10, 1], [10, 2]);
   const base = Date.now() - 60 * 864e5;
   let i = 0;
-  for (const [w, d] of keys.slice(0, 24)) {
+  for (const [w, d] of keys) {
     i += 1;
     await db.doc(`posts/${u.uid}_${w}-${d}`).set({
       uid: u.uid, handle: u.handle, name: u.name, photoURL: '', w, d,
@@ -142,6 +142,21 @@ export async function makeAthlete(extra = {}) {
 // Abertura da semana 1 em `ms` (padrão: 2 dias atrás, então só a semana 1 está aberta).
 export async function setStart(ms = Date.now() - 2 * 864e5) {
   await db.doc('config/app').set({ start: admin.firestore.Timestamp.fromMillis(ms), salesOpen: true });
+}
+
+// Aviso do Asaas de que a medalha foi paga (Pix de R$ 35 do checkout `checkoutId`), pelo webhook de verdade.
+export async function emitMedalPaid(checkoutId, value = 35) {
+  const e = structuredClone(events.pixReceived);
+  e.id = 'evt_e2e_medal_' + Math.random();
+  e.payment.checkoutSession = checkoutId;
+  e.payment.value = value;
+  e.payment.netValue = value - 0.99;
+  const r = await fetch(`${FAKE}/__emit`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ target: WEBHOOK, token: webhookToken(), body: e }),
+  });
+  return (await r.json()).status;
 }
 
 export async function resetStart() {

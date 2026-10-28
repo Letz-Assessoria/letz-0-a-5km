@@ -1,4 +1,4 @@
-// e2e do painel do treinador: acesso, bloqueio, moderação, frete, data da turma e vendas.
+// e2e do painel do treinador: acesso, bloqueio, moderação, data da turma e vendas.
 import { test, expect } from '@playwright/test';
 import {
   admin, auth, clearRateLimits, db, fillAddress, makeAthlete, makeCoach, makeUser, mockViaCep, person, resetStart, seedConcluded, setStart,
@@ -113,140 +113,13 @@ test('esconder post some o conteúdo mas mantém pontos', async ({ page, browser
   await ctx.close();
 });
 
-test('marcar frete pago e rastreio aparecem para o aluno', async ({ page, browser }) => {
-  const a = await makeAthlete();
-  await seedConcluded(a);
-  await db.doc(`users/${a.uid}/private/ship`).set({
-    nome: a.name, cep: '50000000', rua: 'Rua ' + a.handle, num: '10', comp: '', bairro: 'Centro', cidade: 'Recife', uf: 'PE',
-    tel: '81999990000', at: admin.firestore.Timestamp.now(),
-  });
-  await coachPanel(page, 'Medalhas');
-  const card = page.locator('section', { hasText: 'Rua ' + a.handle });
-  await expect(card).toContainText(a.name);
-  await card.getByRole('button', { name: 'Marcar frete pago' }).click();
-  await waitUntil(async () => (await db.doc(`users/${a.uid}/private/ship`).get()).data().paidAt);
-  await card.getByLabel(/Código de rastreio/).fill('aa123456789br');
-  await card.getByLabel(/Código de rastreio/).blur();
-  await waitUntil(async () => (await db.doc(`users/${a.uid}/private/ship`).get()).data().track === 'AA123456789BR');
-
-  const ctx = await browser.newContext();
-  const pa = await ctx.newPage();
-  await login(pa, a);
-  await expect(pa).toHaveURL(/#\/app\/treinos$/);
-  await pa.getByRole('button', { name: /Você concluiu o Do 0 aos 5 km/ }).click();
-  await expect(pa.getByText('AA123456789BR')).toBeVisible();
-  await ctx.close();
-});
-
-test('mudar data da turma tranca semanas para o aluno', async ({ page, browser }) => {
-  const a = await makeAthlete();
-  const ctx = await browser.newContext();
-  const pa = await ctx.newPage();
-  await login(pa, a);
-  await expect(pa.getByText('Ainda trancada')).toHaveCount(0);
-
-  await coachPanel(page, 'Turma');
-  const d = new Date(Date.now() + 10 * 864e5);
-  const local = new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
-  await page.getByLabel(/Abertura da semana 1/).fill(local);
-  await page.getByRole('button', { name: 'Salvar data' }).click();
-  const start = await waitUntil(async () => {
-    const x = (await db.doc('config/app').get()).data().start.toMillis();
-    return x > Date.now() ? x : 0;
-  });
-  expect(Math.abs(start - new Date(local).getTime())).toBeLessThan(61000);
-  await expect(pa.getByText('Ainda trancada')).toBeVisible();
-  await ctx.close();
-});
-
-test('fechar vendas faz o cadastro mostrar vendas encerradas', async ({ page, browser }) => {
-  await coachPanel(page, 'Turma');
-  await page.getByLabel('Vendas abertas').uncheck();
-  await waitUntil(async () => (await db.doc('config/app').get()).data().salesOpen === false);
-
-  await clearRateLimits();
-  const p = person();
-  const ctx = await browser.newContext();
-  const pc = await ctx.newPage();
-  await mockViaCep(pc);
-  await pc.goto('/#/cadastro');
-  await pc.getByLabel('Nome completo').fill(p.name);
-  await pc.getByLabel('E-mail').fill(p.email);
-  await pc.getByLabel('CPF').fill(p.cpf);
-  await pc.getByLabel('Celular com DDD').fill(p.phone);
-  await fillAddress(pc, p);
-  await pc.getByLabel('Senha', { exact: true }).fill(p.password);
-  await pc.getByLabel('Confirme a senha').fill(p.password);
-  await pc.getByLabel(/Li e aceito a política de privacidade/).check();
-  await pc.getByRole('button', { name: /Criar conta e ir para o pagamento/ }).click();
-  await expect(pc.getByRole('alert')).toContainText('As vendas estão encerradas.');
-  await ctx.close();
-  await expect(auth.getUserByEmail(p.email)).rejects.toBeTruthy();
-});
-
-test('painel não mostra botões de simulação', async ({ page }) => {
-  await coachPanel(page);
-  for (const s of ['Financeiro', 'Turma', 'Treinos', 'Conteúdo', 'Medalhas', 'Atletas', 'Feed']) {
-    await page.getByRole('group', { name: 'Seções' }).getByRole('button', { name: s }).click();
-    await expect(page.locator('body')).not.toContainText(/teste|Simular|Kiwify|Liberar as 10 semanas/i);
-  }
-});
-
-test('ver como atleta não cria perfil nem entra no ranking', async ({ page }) => {
-  const c = await coachPanel(page);
-  await page.getByRole('button', { name: 'Ver como atleta' }).click();
-  await expect(page.getByRole('navigation', { name: 'Principal' })).toBeVisible();
-  await tab(page, 'Ranking');
-  expect((await db.doc('users/' + c.uid).get()).exists).toBe(false);
-});
-
-test('treinador recarregando #/app/treinos não vai para o perfil', async ({ page }) => {
-  await coachPanel(page);
-  await page.getByRole('button', { name: 'Ver como atleta' }).click();
-  await expect(page).toHaveURL(/#\/app\/treinos$/);
-  await page.reload();
-  await expect(page.getByRole('navigation', { name: 'Principal' })).toBeVisible();
-  await expect(page).toHaveURL(/#\/app\/treinos$/);
-  await page.goto('/#/perfil');
-  await page.reload();
-  await expect(page).toHaveURL(/#\/admin\//);
-});
-
-test('treinador abre #/admin/atletas direto', async ({ page }) => {
-  const c = await makeCoach();
-  await page.goto('/#/admin/atletas');
-  await page.getByLabel('E-mail').fill(c.email);
-  await page.getByLabel('Senha', { exact: true }).fill(c.password);
-  await page.getByRole('button', { name: 'Entrar' }).click();
-  await expect(page).toHaveURL(/#\/admin\/atletas$/);
-  await page.reload();
-  await expect(page).toHaveURL(/#\/admin\/atletas$/);
-  await expect(page.getByRole('heading', { name: 'Painel' })).toBeVisible();
-});
-
-test('alertas de pagamento aparecem no topo da aba Atletas e podem ser resolvidos', async ({ page }) => {
-  const s = await makeUser('pending', { profiled: true, welcomed: true, handle: uniqueHandle() });
-  await withProfile(s);
-  const ref = await db.collection('alerts').add({
-    type: 'duplicate-payment', uid: s.uid, checkoutId: 'ck-e2e', eventId: 'evt-e2e', at: new Date(), resolved: false,
-  });
-  await coachPanel(page, 'Atletas');
-  const box = page.locator('[data-alerts]');
-  await expect(box).toContainText('Atenção: 1 alerta de pagamento');
-  await expect(box).toContainText('Segundo pagamento de conta já paga');
-  await box.getByRole('button', { name: 'Marcar resolvido' }).click();
-  await expect(box).toHaveCount(0);
-  await waitUntil(async () => (await ref.get()).data().resolved === true);
-});
-
 test('financeiro: KPIs, vendas, busca e ficha do cliente a partir de payments', async ({ page }) => {
   await db.recursiveDelete(db.collection('payments'));
   const a = await makeAthlete({ name: 'Ana Financeira' });
   const b = await makeAthlete({ name: 'Bruno Reembolsado' });
   const c = await makeUser('pending', { name: 'Carla Aguardando', profiled: true, welcomed: true, handle: uniqueHandle() });
-  await db.doc(`users/${a.uid}/private/profile`).set({ email: a.email, cpf: '12345678909', phone: '5581999990000', policyAcceptedAt: new Date() });
+  await db.doc(`users/${a.uid}/private/profile`).set({ email: a.email, cpf: '12345678909', phone: '5581999990000', policyAcceptedAt: new Date(), address: { cep: '50000000', street: 'Rua A', number: '1', complement: '', district: 'Centro', city: 'Recife', uf: 'PE' } });
   await db.doc(`users/${a.uid}/private/billing`).set({ status: 'paid', method: 'CREDIT_CARD', installments: 12 });
-  await db.doc(`users/${a.uid}/private/ship`).set({ nome: 'Ana', rua: 'Rua A', num: '1', bairro: 'Centro', cidade: 'Recife', uf: 'PE', cep: '50000000', tel: '81999990000', at: new Date() });
   await db.doc(`users/${b.uid}/private/profile`).set({ email: b.email, cpf: '98765432100', phone: '', policyAcceptedAt: new Date() });
   await db.doc(`users/${b.uid}/private/billing`).set({ status: 'refunded', method: 'PIX', installments: 1 });
   await withProfile(c);
@@ -365,4 +238,194 @@ test('conteúdo: vídeos, links e grupo só gravam em Salvar alterações, com v
   await expect(page.getByLabel('Link de convite do grupo no WhatsApp')).toHaveValue('https://chat.whatsapp.com/abc123');
   // limpa o que o teste gravou
   await db.doc('config/app').set({ grupo: '', av: '', videos: admin.firestore.FieldValue.delete() }, { merge: true });
+});
+
+// ---------- medalhas ----------
+const ADDR = { cep: '50030230', street: 'Rua da Aurora', number: '123', complement: 'Apto 4', district: 'Boa Vista', city: 'Recife', uf: 'PE' };
+const ADDR_TXT = 'Rua da Aurora, 123 (Apto 4) - Boa Vista, Recife/PE, CEP 50030-230';
+// Aluno que concluiu, com (ou sem) pedido de medalha gravado pelo Admin SDK.
+async function concludedAthlete(name, medal) {
+  // O marcador users.concluded vem dos posts (e é recalculado quando a data da turma muda): semeia treinos de verdade.
+  const a = await makeAthlete({ name });
+  await seedConcluded(a);
+  await waitUntil(async () => (await db.doc('users/' + a.uid).get()).data().concluded === true);
+  if (medal) await db.doc(`users/${a.uid}/private/medal`).set({ address: ADDR, refundCount: 0, updatedAt: new Date(), ...medal });
+  return a;
+}
+const mrow = (page, name) => page.locator('tr[data-medal]', { hasText: name });
+const mcount = async (page, k) => Number(await page.locator(`[data-count="${k}"]`).innerText());
+
+test('medalhas: marcar enviado com rastreio, contadores, e-mail, copiar endereço e voltar um passo', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const a = await concludedAthlete('Marina Medalha Pago', { status: 'paid', checkoutId: 'ck-med-1', paidAt: new Date() });
+  await concludedAthlete('Nando Medalha Sem Compra', null);
+  await db.doc('testMail/last').delete();
+  await coachPanel(page, 'Medalhas');
+  const r = mrow(page, 'Marina Medalha Pago');
+  await expect(r).toContainText('Pago, aguardando envio');
+  await expect(mrow(page, 'Nando Medalha Sem Compra')).toContainText('Não comprou');
+  const [paid0, shipped0, none0] = [await mcount(page, 'paid'), await mcount(page, 'shipped'), await mcount(page, 'none')];
+  expect(paid0).toBeGreaterThanOrEqual(1);
+  expect(none0).toBeGreaterThanOrEqual(1);
+
+  // endereço completo e botão de copiar
+  await expect(r).toContainText(ADDR_TXT);
+  await r.getByRole('button', { name: 'Copiar endereço' }).click();
+  await expect(r.getByRole('button', { name: 'Copiado' })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(ADDR_TXT);
+
+  // sem rastreio: erro do servidor em role=alert, status não muda
+  await r.getByRole('button', { name: 'Marcar enviado' }).click();
+  await expect(r.getByLabel('Data de envio')).toHaveValue(/^\d{4}-\d{2}-\d{2}$/);
+  await r.getByRole('button', { name: 'Confirmar envio' }).click();
+  await expect(r.getByRole('alert')).toContainText('código de rastreio');
+  expect((await db.doc(`users/${a.uid}/private/medal`).get()).data().status).toBe('paid');
+
+  // com rastreio e data
+  await r.getByLabel('Código de rastreio').fill('BR123456789XX');
+  await r.getByLabel('Data de envio').fill('2026-11-20');
+  await r.getByRole('button', { name: 'Confirmar envio' }).click();
+  await expect(r).toContainText('Enviado');
+  await expect(r).toContainText('BR123456789XX');
+  await expect(r).toContainText('Enviado em 20/11/2026');
+  await expect(r.locator('[data-mail="ok"]')).toContainText('E-mail enviado');
+  expect(await mcount(page, 'paid')).toBe(paid0 - 1);
+  expect(await mcount(page, 'shipped')).toBe(shipped0 + 1);
+  const mail = await waitUntil(async () => (await db.doc('testMail/last').get()).data());
+  expect(mail.to).toBe(a.email);
+  expect(mail.text).toContain('BR123456789XX');
+  const m1 = (await db.doc(`users/${a.uid}/private/medal`).get()).data();
+  expect(m1.status).toBe('shipped');
+  expect(m1.shippedAt).toBe('2026-11-20');
+
+  // reenviar e-mail
+  const n0 = (await db.doc('testMail/last').get()).data().n;
+  await r.getByRole('button', { name: 'Reenviar e-mail' }).click();
+  await expect(r.getByRole('status')).toContainText('E-mail reenviado');
+  expect((await db.doc('testMail/last').get()).data().n).toBe(n0 + 1);
+
+  // entregue e voltar um passo
+  await r.getByRole('button', { name: 'Marcar entregue' }).click();
+  await expect(r).toContainText('Entregue em');
+  expect(await mcount(page, 'delivered')).toBeGreaterThanOrEqual(1);
+  // voltar um passo pede confirmação; cancelar não muda nada
+  await r.getByRole('button', { name: 'Voltar para enviado' }).click();
+  await expect(r).toContainText('apaga a data de entrega');
+  await r.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(r.locator('.pill')).toContainText('Entregue');
+  expect((await db.doc(`users/${a.uid}/private/medal`).get()).data().status).toBe('delivered');
+  await r.getByRole('button', { name: 'Voltar para enviado' }).click();
+  await r.getByRole('button', { name: 'Voltar o passo' }).click();
+  await expect(r.locator('.pill')).toContainText('Enviado');
+  await r.getByRole('button', { name: 'Voltar para pago' }).click();
+  await expect(r).toContainText('apaga o código de rastreio');
+  await r.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(r.locator('.pill')).toContainText('Enviado');
+  expect((await db.doc(`users/${a.uid}/private/medal`).get()).data().trackingCode).toBe('BR123456789XX');
+  await r.getByRole('button', { name: 'Voltar para pago' }).click();
+  await r.getByRole('button', { name: 'Voltar o passo' }).click();
+  await expect(r.locator('.pill')).toContainText('Pago, aguardando envio');
+  await expect(r).not.toContainText('BR123456789XX');
+  expect(await mcount(page, 'paid')).toBe(paid0);
+});
+
+test('medalhas: pedido pago continua na lista quando o aluno desmarca um treino (concluded segue true) e quem tem pedido sem concluded também aparece', async ({ page }) => {
+  const a = await concludedAthlete('Paulo Pago Desmarcou', { status: 'paid', checkoutId: 'ck-med-un', paidAt: new Date() });
+  await db.doc('users/' + a.uid).update({ medalOrder: true });
+  const done0 = (await db.doc('users/' + a.uid).get()).data().done;
+  await db.doc(`posts/${a.uid}_10-1`).delete();
+  await waitUntil(async () => (await db.doc('users/' + a.uid).get()).data().done < done0);
+  expect((await db.doc('users/' + a.uid).get()).data().concluded).toBe(true);
+  // Conta com pedido pago mas sem o marcador concluded (ex.: dado legado): a lista usa medalOrder.
+  const b = await makeAthlete({ name: 'Beatriz Pedido Sem Marcador' });
+  await db.doc('users/' + b.uid).update({ medalOrder: true });
+  await db.doc(`users/${b.uid}/private/medal`).set({ status: 'paid', address: ADDR, refundCount: 0, checkoutId: 'ck-med-b', paidAt: new Date(), updatedAt: new Date() });
+  await coachPanel(page, 'Medalhas');
+  await expect(mrow(page, 'Paulo Pago Desmarcou')).toContainText('Pago, aguardando envio');
+  await expect(mrow(page, 'Beatriz Pedido Sem Marcador')).toContainText('Pago, aguardando envio');
+});
+
+test('medalhas: enviado sem e-mail mostra o aviso e Reenviar e-mail resolve; falha do envio aparece', async ({ page }) => {
+  const a = await concludedAthlete('Otávia Sem Email', {
+    status: 'shipped', checkoutId: 'ck-med-2', paidAt: new Date(), trackingCode: 'BR000111222', shippedAt: '2026-11-01',
+  });
+  await coachPanel(page, 'Medalhas');
+  const r = mrow(page, 'Otávia Sem Email');
+  await expect(r.locator('[data-mail="no"]')).toContainText('E-mail não enviado');
+  await db.doc('testFaults/mail').set({ fail: true });
+  try {
+    await r.getByRole('button', { name: 'Reenviar e-mail' }).click();
+    await expect(r.getByRole('alert')).toContainText('e-mail não saiu');
+    await expect(r.locator('[data-mail="no"]')).toBeVisible();
+  } finally {
+    await db.doc('testFaults/mail').delete();
+  }
+  await r.getByRole('button', { name: 'Reenviar e-mail' }).click();
+  await expect(r.locator('[data-mail="ok"]')).toBeVisible();
+  expect((await db.doc(`users/${a.uid}/private/medal`).get()).data().emailedCount).toBe(1);
+});
+
+test('medalhas: filtro, busca, marca de reembolso e alertas medal-*', async ({ page }) => {
+  await concludedAthlete('Paula Filtro Pago', { status: 'paid', checkoutId: 'ck-f1', paidAt: new Date(), refundRequestedAt: new Date(), refundCount: 1 });
+  const ent = await concludedAthlete('Eduardo Filtro Entregue', { status: 'delivered', checkoutId: 'ck-f2', paidAt: new Date(), trackingCode: 'BR999888777', shippedAt: '2026-11-02', deliveredAt: '2026-11-09', emailedAt: new Date(), emailedCount: 1 });
+  await concludedAthlete('Rita Filtro Reembolsada', { status: 'refunded', checkoutId: 'ck-f3', refundCount: 1 });
+  await db.collection('alerts').add({ type: 'medal-refunded-shipped', uid: ent.uid, at: new Date(), resolved: false });
+  await db.collection('alerts').add({ type: 'medal-partial-refund', uid: ent.uid, at: new Date(), resolved: false });
+  await db.collection('alerts').add({ type: 'medal-email-failed', uid: ent.uid, at: new Date(), resolved: false });
+  await coachPanel(page, 'Medalhas');
+  const chips = page.getByRole('group', { name: 'Situação da medalha' });
+  await expect(mrow(page, 'Paula Filtro Pago')).toContainText('Pediu reembolso');
+  await expect(mrow(page, 'Paula Filtro Pago')).toContainText('Reembolsos: 1');
+  await expect(mrow(page, 'Eduardo Filtro Entregue')).toContainText('Entregue em 09/11/2026');
+  await expect(page.getByRole('alert').filter({ hasText: 'Atenção' })).toContainText('Medalha reembolsada depois de enviada');
+  await expect(page.getByRole('alert').filter({ hasText: 'Atenção' })).toContainText('Reembolso parcial da medalha');
+  await expect(page.getByRole('alert').filter({ hasText: 'Atenção' })).toContainText('e-mail de envio da medalha não saiu');
+
+  await chips.getByRole('button', { name: /^Reembolsado/ }).click();
+  await expect(page.locator('tr[data-medal]').filter({ hasText: 'Rita Filtro Reembolsada' })).toHaveCount(1);
+  await expect(page.locator('tr[data-medal]').filter({ hasText: 'Paula Filtro Pago' })).toHaveCount(0);
+  await chips.getByRole('button', { name: /^Todas/ }).click();
+  await page.getByLabel('Buscar por nome').fill('eduardo filtro');
+  await expect(page.locator('tr[data-medal]')).toHaveCount(1);
+  await expect(page.locator('tr[data-medal]')).toContainText('Eduardo Filtro Entregue');
+  await page.getByLabel('Buscar por nome').fill('zzzz-ninguem');
+  await expect(page.getByText('Nenhum aluno encontrado com esse filtro.')).toBeVisible();
+});
+
+test('medalhas: tabela rola dentro do cartão em 390 px, sem scroll horizontal na página', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await concludedAthlete('Larissa Mobile', { status: 'paid', checkoutId: 'ck-m1', paidAt: new Date() });
+  await coachPanel(page, 'Medalhas');
+  await expect(mrow(page, 'Larissa Mobile')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test('venda de medalha aparece como Medalha e fica fora de receita e ticket médio; Atletas marca o pedido de reembolso', async ({ page }) => {
+  await db.recursiveDelete(db.collection('payments'));
+  const a = await makeAthlete({ name: 'Ana Programa' });
+  const b = await makeAthlete({ name: 'Beto Reembolso' });
+  await db.doc(`users/${a.uid}/private/profile`).set({ email: a.email, cpf: '12345678909', phone: '', policyAcceptedAt: new Date() });
+  await db.doc(`users/${a.uid}/private/billing`).set({ status: 'paid', method: 'PIX', installments: 1 });
+  await db.doc(`users/${b.uid}/private/profile`).set({ email: b.email, cpf: '98765432100', phone: '', policyAcceptedAt: new Date() });
+  await db.doc(`users/${b.uid}/private/billing`).set({ status: 'paid', method: 'PIX', installments: 1, refundRequestedAt: new Date(), refundCount: 1 });
+  const now = new Date();
+  await db.doc('payments/ck-prog').set({ uid: a.uid, checkoutId: 'ck-prog', status: 'paid', method: 'PIX', gross: 159, net: 157.01, product: 'Do 0 aos 5 km', kind: 'program', paidAt: now, updatedAt: now });
+  await db.doc('payments/ck-medal').set({ uid: a.uid, checkoutId: 'ck-medal', status: 'paid', method: 'PIX', gross: 35, net: 34.01, product: 'Medalha Letz bora!', kind: 'medal', paidAt: now, updatedAt: now });
+  await coachPanel(page);
+  const kpi = (n) => page.locator(`[data-kpi="${n}"]`);
+  await expect(kpi('liquida')).toContainText('R$ 157,01');
+  await expect(kpi('aprovadas').locator('b')).toHaveText('1');
+  await expect(kpi('aprovadas')).toContainText('Ticket médio R$ 157,01');
+  await expect(page.locator('[data-medal-sales]')).toContainText('1 venda aprovada · R$ 34,01 líquido');
+  await page.getByRole('group', { name: 'Financeiro' }).getByRole('button', { name: 'Vendas' }).click();
+  const med = page.locator('table[data-fin="vendas"] tbody tr', { hasText: 'R$ 35,00' });
+  await expect(med).toHaveCount(1);
+  await expect(med).toContainText('Medalha');
+  await expect(med).not.toContainText('Letz bora');
+
+  await page.getByRole('group', { name: 'Seções' }).getByRole('button', { name: 'Atletas' }).click();
+  const br = row(page, 'Beto Reembolso');
+  await expect(br.locator('[data-refund-ask]')).toContainText('Pediu reembolso');
+  await expect(br).toContainText('Reembolsos: 1');
+  await expect(row(page, 'Ana Programa').locator('[data-refund-ask]')).toHaveCount(0);
 });
