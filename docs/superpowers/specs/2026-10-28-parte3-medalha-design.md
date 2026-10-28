@@ -15,7 +15,7 @@ Quem conclui o "Do 0 aos 5 km" ganha a **medalha Letz bora!**, enviada pelo corr
 - **Status do envio, controlados à mão pelo treinador** no painel: `Concluiu, não comprou` (derivado, sem registro), `Pago, aguardando envio`, `Enviado` (com **código de rastreio** e **data de envio**), `Entregue` (com data de entrega).
 - **Painel do treinador, aba Medalhas:** visão clara de quem concluiu e não comprou, quem comprou e aguarda envio, quem está a caminho e quem recebeu; contadores por status, filtro por status e busca por nome; em cada pedido, o **endereço completo** (com botão de copiar), data do pagamento, rastreio, data de envio e de entrega; edição do status.
 - **E-mail ao aluno** quando o treinador marcar **Enviado**, com rastreio, data de envio e endereço. Todo e-mail transacional sai de `letzassessoria@gmail.com`.
-- **Feed:** quem **comprou** a medalha pode postar no feed, como num treino concluído (foto e comentário), com um selo identificando o post como da medalha.
+- **Feed:** quem tem a medalha **enviada** (status `Enviado` ou `Entregue`) pode postar no feed, como num treino concluído (foto e comentário), com um selo identificando o post como da medalha. Decisão do dono: libera a partir de **Enviado**, e não de Entregue, porque marcar a entrega é manual e pode atrasar enquanto a medalha já chegou.
 - **Financeiro:** os pagamentos de medalha aparecem junto das vendas, identificados como produto "Medalha Letz bora!", **fora** da receita do programa e do ticket médio dele.
 
 ## Não objetivos
@@ -59,7 +59,7 @@ Decisão do autor do design (o construtor pode ajustar os nomes):
 - **Modal** ao abrir o app depois de concluir e **sem compra paga**: "Você ganhou a medalha", com **Continuar** (abre o endereço) e **Depois** (fecha; o aviso volta em outra abertura e fica sempre acessível na tela de fim e no menu). Só aparece para quem concluiu pela regra acima.
 - **Endereço:** primeira opção é **usar o endereço do cadastro** (mostrado em uma linha para conferir); a outra é **informar outro**, com o mesmo formulário do cadastro (CEP com busca no ViaCEP, número, complemento, rua, bairro, cidade e UF). Quem se cadastrou antes de existir endereço no cadastro (conta antiga) cai direto na opção de informar.
 - **Confirmar** → pagamento no Asaas → volta ao app em uma tela **"Pagamento da medalha"** (aguardando a confirmação, como `#/confirmando`) que vira a tela de status quando o webhook chega.
-- **Tela da medalha:** status atual com datas, rastreio (texto copiável; link para o rastreamento dos Correios é opcional), endereço de entrega e o botão para postar no feed quando comprou.
+- **Tela da medalha:** status atual com datas, rastreio (texto copiável; link para o rastreamento dos Correios é opcional), endereço de entrega e o botão para postar no feed quando a medalha estiver enviada.
 - **Feed:** o post da medalha usa o mesmo formulário do post de treino (foto e comentário), com selo "Medalha". Não conta pontos. O treinador pode esconder, como em qualquer post.
 - Substitui o fluxo antigo do protótipo (`S.ship`, `pay-open`, Pix manual com QR, campos de frete e chave Pix do painel).
 
@@ -77,16 +77,28 @@ Decisão do autor do design (o construtor pode ajustar os nomes):
 - Em **Atletas**, o status da medalha do aluno (pequeno), se for simples.
 - A aba "Medalhas" já existe nas rotas do painel (`#/admin/medalhas`).
 
+## Pedido de reembolso e limite de recompra (programa e medalha)
+
+Decisão do dono, **vale para a compra do programa e para a medalha**. O reembolso é sempre **feito à mão pela Letz no painel do Asaas**; o app só leva o aluno até uma conversa com a assessoria para tentar evitar o cancelamento.
+
+- **Programa: prazo de 7 dias.** Na área do aluno, um botão **"Solicitar reembolso"** com **contador de dias** (por exemplo "faltam 5 dias do prazo de reembolso"). Os 7 dias contam **da data do pagamento** (`paidAt` do programa). Dentro do prazo, ao clicar o aluno é **levado ao WhatsApp da assessoria** (o mesmo link `wa` que já está em `config/app`), com mensagem pré-preenchida (nome, e-mail e "pedido de reembolso do programa"), para um instrutor conversar e tentar convertê-lo a ficar. O clique também **registra** o pedido (`refundRequestedAt` no billing), para o treinador ver no painel quem pediu. **Depois de 7 dias** o botão de reembolso deixa de aparecer e dá lugar a "Falar com a assessoria" (o mesmo WhatsApp). *(Minha: a regra de depois dos 7 dias não foi dita; a mais simples é só mostrar o contato.)*
+- **Medalha: enquanto não foi enviada.** Mesmo botão, **sem contador**: aparece enquanto o pedido está `Pago, aguardando envio`. Depois de `Enviado` (ou `Entregue`) o botão some e o texto passa a dizer que, para qualquer reembolso, é preciso falar com os instrutores no WhatsApp.
+- **Quem reembolsa:** a Letz, no Asaas. O reembolso chega pelo webhook (`PAYMENT_REFUNDED`) e o sistema reage como já foi definido: programa → conta **bloqueada**; medalha → pedido `Reembolsado` (regra acima).
+- **Limite de recompra: uma vez.** Depois de reembolsar, o aluno **pode comprar de novo uma única vez**. Contador por aluno e por produto: `refundCount` (no billing do programa e no pedido da medalha), **incrementado a cada reembolso total ou chargeback**. Pode comprar de novo enquanto `refundCount < 2`; no **segundo** reembolso fica bloqueado de comprar aquele produto (mensagem "fale com a assessoria no WhatsApp"). Evita o ciclo comprar, reembolsar, comprar de novo. O servidor confere na hora de abrir qualquer checkout (programa e medalha); o app só esconde o botão.
+- **Recompra do programa:** a conta reembolsada está bloqueada (tela "Bloqueado"). Se `refundCount < 2`, a tela mostra **"Comprar de novo"**, que reabre o pagamento (novo checkout, mesmo preço, conta e CPF os mesmos); pago o novo checkout, o acesso volta pelo webhook. Se `refundCount >= 2`, só aparece "Falar com a assessoria". Não conta no limite o aluno que nunca reembolsou.
+- **Painel:** no Atletas, o pedido de reembolso (`refundRequestedAt`, destacado) e o `refundCount`; na aba Medalhas, a mesma marca por pedido. Nada disso bloqueia sozinho: o treinador decide e reembolsa no Asaas.
+- Anti-objetivo: o aluno reembolsar e comprar várias vezes, ou o botão de reembolso levar a uma devolução automática (não existe devolução automática).
+
 ## Decisões do autor depois da revisão do construtor
 
 Marcadas como **minhas**, para o dono conferir:
 
 - **Reembolso, chargeback ou reprovação (minha):** há **um só** documento `private/medal` por aluno. Se o pedido ainda **não foi enviado** (`pending` ou `paid`), vira `refunded` e o aluno pode **comprar de novo** (novo checkout). Se já está `shipped` ou `delivered`, o status e os dados de envio **não são sobrescritos**: só gera alerta no painel para o treinador decidir. O pagamento duplicado de quem já pagou também gera só alerta.
 - **Prova de conclusão (minha):** o servidor confere os treinos marcados do aluno **no momento da compra**, contando os posts de treino dele mesmo escondidos pelo treinador (o escondido não "desconclui"). Depois de `paid`, a conclusão **não é rechecada**. Cada treino é uma chave única (`semana-dia`, as três finais são `10-0`, `10-1` e `10-2`).
-- **Regra antiga de conclusão (minha):** a turma abre em 08/11/2026 e **não há aluno real** em produção que tenha concluído; não precisa de migração. A nova regra vale para todos.
+- **Regra de conclusão (conferida na conta do dono, `llipeandrade34@icloud.com`):** os dados de produção mostram 27 treinos marcados, semanas 1 a 8 e todo o 10 (`10-0`, `10-1`, `10-2`), sem a semana 9. Pela regra **nova** (24 treinos e os três últimos dias) essa conta **conclui** (27 ≥ 24 e a semana 10 completa), e pela antiga também. A regra mantém o **mínimo de 80%** (24 de 30) e exige o **fechamento do programa** (semana 10 inteira); como as semanas abrem em ordem, ninguém conclui antes da semana 10 abrir, e treinos atrasados podem ser marcados depois (não há prazo para marcar), então o aluno que perdeu um dia da semana 10 ainda pode completá-lo. A turma abre em 08/11/2026 e não há aluno real que tenha concluído; sem migração.
 - **Fluxo antigo do protótipo (minha):** não há dados reais de frete por Pix em produção (nenhum aluno chegou ao fim). O fluxo antigo (`S.ship`, Pix manual com QR, `frete`/`chave`/`pnome`/`pcidade` na configuração) **é removido**, sem migração. Os campos de frete e Pix do painel saem.
 - **Transições do treinador (minha, seguindo a sugestão da revisão):** `paid` → `shipped` → `delivered`, só para frente. Pode **corrigir um passo para trás** (`delivered` → `shipped`, `shipped` → `paid`) sem reenviar e-mail; não pode marcar `Enviado` ou `Entregue` um pedido `pending` ou `refunded`. Pode editar rastreio e datas depois de enviado e usar **"Reenviar e-mail"**. O e-mail automático sai **uma vez**, na primeira passagem para `shipped`.
-- **Feed (minha, coerente com "quem comprou"):** **um** post de medalha por aluno, liberado quando o pedido está `paid`, `shipped` ou `delivered`; `refunded` perde o direito de postar (o post existente fica e o treinador decide esconder). As regras de `posts` precisam de um caso para o post de medalha, distinto dos de treino (id próprio, sem pontos).
+- **Feed (decisão do dono):** **um** post de medalha por aluno, liberado quando o pedido está `shipped` ou `delivered` (não em `paid`). Se o pedido for reembolsado, perde o direito de postar (o post existente fica e o treinador decide esconder). As regras de `posts` precisam de um caso para o post de medalha, distinto dos de treino (id próprio, sem pontos).
 
 ## Restrições
 
