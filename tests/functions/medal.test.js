@@ -601,6 +601,14 @@ describe('reembolso e recompra', () => {
       assert.equal((await billingOf(s.uid)).status, 'paid');
     });
 
+    it('conta reembolsada que o treinador liberou (access active) não recompra', async () => {
+      const s = await refunded();
+      await db.doc('users/' + s.uid).update({ access: 'active' });
+      const r = await call('rebuyProgram', {}, s.token);
+      assert.equal(r.error && r.error.status, 'FAILED_PRECONDITION');
+      assert.equal((await billingOf(s.uid)).status, 'refunded');
+    });
+
     it('repetir enquanto o checkout vale devolve o mesmo, sem abrir outro', async () => {
       const s = await refunded();
       const a = await call('rebuyProgram', {}, s.token);
@@ -779,6 +787,15 @@ describe('medalha: webhook', () => {
     await hook(payment('pixReceived', s.checkoutId, { paymentId: 'pay_tardio_1' }));
     assert.equal((await get(`users/${s.uid}/private/medal`)).status, 'refunded');
     assert.deepEqual(await alertTypes(), ['paid-closed-checkout']);
+  });
+
+  it('(c2) chargeback ou reprovação de medalha paid: refunded e alerta medal-chargeback; reembolso do treinador segue sem alerta', async () => {
+    const a = await withOrder();
+    await hook(payment('pixReceived', a.checkoutId));
+    assert.equal((await hook(payment('cardChargeback', a.checkoutId))).status, 200);
+    assert.equal((await get(`users/${a.uid}/private/medal`)).status, 'refunded');
+    assert.equal((await get(`users/${a.uid}/private/medal`)).refundCount, 1);
+    assert.deepEqual(await alertTypes(), ['medal-chargeback']);
   });
 
   for (const status of ['shipped', 'delivered']) {

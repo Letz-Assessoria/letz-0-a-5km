@@ -6,8 +6,9 @@ const { createClient } = require('./asaas.js');
 
 const ASAAS_API_KEY = defineSecret('ASAAS_API_KEY');
 const ASAAS_WEBHOOK_TOKEN = defineSecret('ASAAS_WEBHOOK_TOKEN');
-// Senha de app do Gmail (e-mail da medalha). Ainda não existe no Secret Manager: só a função
-// que envia e-mail a declara em `secrets`, e sem ela o mailer usa um transporte falso.
+// Senha de app do Gmail (e-mail da medalha). Existe no Secret Manager de produção; só as funções
+// que enviam e-mail a declaram em `secrets`. Sem o valor, o mailer devolve `not-configured`
+// (produção); só no emulador ele usa um transporte falso.
 const GMAIL_APP_PASSWORD = defineSecret('GMAIL_APP_PASSWORD');
 const ASAAS_BASE_URL = defineString('ASAAS_BASE_URL');
 const APP_URL = defineString('APP_URL');

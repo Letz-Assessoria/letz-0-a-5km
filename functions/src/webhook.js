@@ -212,6 +212,8 @@ async function processMedalEvent(db, tx, { eventRef, eventId, body, ev, checkout
       result = 'checkout já ' + checkout.status + ': estorno repetido';
     } else if (medal.status === 'paid') {
       tx.update(medalRef, { status: 'refunded', refundCount: FieldValue.increment(1), updatedAt: now });
+      // Reembolso do próprio treinador dispensa alerta; chargeback e reprovação vêm de fora.
+      if (ev.kind !== 'refunded') alert('medal-chargeback');
       result = 'medalha reembolsada';
     } else {
       // Já enviada: não sobrescreve status, rastreio nem datas; o treinador decide.

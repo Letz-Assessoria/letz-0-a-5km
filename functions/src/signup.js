@@ -519,7 +519,8 @@ async function rebuyProgram(request) {
   ]);
   const billing = billingSnap.exists ? billingSnap.data() : null;
   const reopened = !!billing && billing.status === 'pending' && !!billing.rebuyAt;
-  if (!user.exists || !billing || !(REBUYABLE.includes(billing.status) || reopened)) {
+  // Só conta bloqueada recompra: quem o treinador liberou à mão já está com acesso.
+  if (!user.exists || user.get('access') !== 'blocked' || !billing || !(REBUYABLE.includes(billing.status) || reopened)) {
     throw new HttpsError('failed-precondition', MSG_NO_REBUY);
   }
   if (cpfGone(billing)) throw new HttpsError('failed-precondition', MSG_CLOSED);
