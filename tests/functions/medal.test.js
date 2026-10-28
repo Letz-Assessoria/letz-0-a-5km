@@ -259,6 +259,27 @@ describe('medalha: startMedalCheckout', () => {
     assert.equal(m.refundCount, 1);
   });
 
+  it('recompra depois de refunded: apaga o que era do pedido anterior e preserva refundCount; novo pedido pago pode pedir reembolso', async () => {
+    const s = await concluded();
+    const ts = admin.firestore.Timestamp.fromMillis(Date.now() - 864e5);
+    await db.doc(`users/${s.uid}/private/medal`).set({
+      status: 'refunded', refundCount: 1, checkoutId: 'ck-velho', paidAt: ts, refundRequestedAt: admin.firestore.Timestamp.now(),
+      emailedAt: ts, emailedCount: 2, trackingCode: 'BR123456789BR', shippedAt: '2026-10-20', deliveredAt: '2026-10-25',
+    });
+    const r = await call('startMedalCheckout', { useSignupAddress: true }, s.token);
+    assert.equal(r.error, undefined, JSON.stringify(r.error));
+    const m = await get(`users/${s.uid}/private/medal`);
+    assert.equal(m.status, 'pending');
+    assert.equal(m.refundCount, 1);
+    for (const k of ['refundRequestedAt', 'emailedAt', 'emailedCount', 'paidAt', 'trackingCode', 'shippedAt', 'deliveredAt']) {
+      assert.equal(m[k], undefined, k);
+    }
+    // Segundo pedido pago: o aluno consegue pedir o reembolso dele (e o e-mail de envio sai de novo).
+    assert.equal((await hook(payment('pixReceived', m.checkoutId))).status, 200);
+    assert.deepEqual((await call('requestRefund', { product: 'medal' }, s.token)).result, { ok: true });
+    assert.ok((await get(`users/${s.uid}/private/medal`)).refundRequestedAt);
+  });
+
   it('endereço inválido: invalid-argument; cadastro sem endereço com useSignupAddress também', async () => {
     const s = await concluded();
     const bad = await call('startMedalCheckout', { useSignupAddress: false, address: { cep: '123', street: '' } }, s.token);

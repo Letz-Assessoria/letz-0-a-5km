@@ -90,9 +90,15 @@ async function startMedalCheckout(request) {
     });
     // Marca o aluno com pedido: a aba Medalhas do treinador lista quem tem pedido mesmo sem concluded.
     tx.update(db.doc('users/' + uid), { medalOrder: true });
+    // Pedido novo depois de um reembolso: nada do pedido anterior vale (como em rebuyProgram).
+    // refundCount fica; ausente conta como 0 (pedidos anteriores ao contador).
+    const del = FieldValue.delete();
+    const fresh = c && c.status === 'refunded'
+      ? { refundRequestedAt: del, emailedAt: del, emailedCount: del, paidAt: del, trackingCode: del, shippedAt: del, deliveredAt: del }
+      : {};
     tx.set(medalRef, {
       status: 'pending', address, checkoutId: checkout.id, url: checkout.url, expiresAt,
-      refundCount: (c && c.refundCount) || 0, updatedAt: FieldValue.serverTimestamp(),
+      refundCount: (c && c.refundCount) || 0, updatedAt: FieldValue.serverTimestamp(), ...fresh,
     }, { merge: true });
     return { url: checkout.url };
   });
