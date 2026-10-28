@@ -100,20 +100,22 @@ firebase deploy --only functions --project $PROJECT --force
 - `--force` aceita a política de limpeza de imagens do Artifact Registry sem perguntar.
 - No primeiro deploy de 2ª geração, o Eventarc pode demorar a propagar e as Functions de gatilho (`onPostWritten`, `onReactionWritten`, `onUserWritten`, `onConfigWritten`) falham com erro de permissão. Espere alguns minutos e rode o mesmo comando de novo; é seguro repetir.
 
-Verificar: `firebase functions:list --project $PROJECT` mostra `signup`, `resumeCheckout`, `asaasWebhook` e as quatro de gatilho, todas em `southamerica-east1`.
+Verificar: `firebase functions:list --project $PROJECT` mostra `signup`, `resumeCheckout`, `createPartner`, `createCoupon`, `asaasWebhook` e as quatro de gatilho, todas em `southamerica-east1`.
 
 ## 8. Chamada pública (Cloud Run invoker)
 
-As três Functions HTTP precisam aceitar chamadas sem login do Google (a segurança está dentro delas: token do webhook, validação dos dados e limite de cadastros no signup). O deploy de dev esqueceu isso em duas.
+As Functions HTTP (`signup`, `resumeCheckout`, `createPartner`, `createCoupon` e `asaasWebhook`) precisam aceitar chamadas sem login do Google (a segurança está dentro delas: token do webhook, validação dos dados e limite de cadastros no signup). O deploy de dev esqueceu isso em duas.
 
 ```bash
-for fn in signup resumecheckout asaaswebhook; do
+for fn in signup resumecheckout createpartner createcoupon asaaswebhook; do
   gcloud run services add-iam-policy-binding $fn --region=$REGION --member=allUsers --role=roles/run.invoker --project=$PROJECT
   gcloud run services get-iam-policy $fn --region=$REGION --project=$PROJECT | grep -A1 'allUsers'
 done
 ```
 
-Verificar: cada um dos três imprime `- allUsers` com `roles/run.invoker`. Sem isso, `signup` falha no site e `asaasWebhook` devolve 403 ao Asaas (pagamentos nunca ativam e a fila é pausada).
+As callables `createPartner` e `createCoupon` também precisam do `allUsers` (callable v2 é Cloud Run); a checagem de admin (claim `admin === true`) está no código delas, então anônimo e aluno recebem recusa.
+
+Verificar: cada um dos cinco imprime `- allUsers` com `roles/run.invoker`. Sem isso, `signup` falha no site e `asaasWebhook` devolve 403 ao Asaas (pagamentos nunca ativam e a fila é pausada).
 
 ## 9. Config da turma e TTL
 
