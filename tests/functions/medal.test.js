@@ -424,7 +424,7 @@ describe('medalha: envio (updateMedalOrder, resendMedalEmail)', () => {
     assert.equal(m.to, s.p.email);
     assert.match(m.subject, /medalha/i);
     const first = s.p.name.split(' ')[0];
-    for (const part of [first, 'BR123456789', '03/11/2026', 'Rua da Aurora, 100', 'Recife/PE', (await orderOf(s.uid)).address.cep]) assert.ok(m.text.includes(part), part);
+    for (const part of [first, 'BR123456789', '03/11/2026', 'Rua da Aurora, 100', 'Recife/PE', 'CEP 50050-000']) assert.ok(m.text.includes(part), part);
     assert.doesNotMatch(m.text, /R\$|35|pix|cart[aã]o|cpf|checkout/i);
   });
 

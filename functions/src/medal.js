@@ -140,7 +140,8 @@ function dateOf(v) {
   return v;
 }
 
-const addressLine = (a) => `${a.street}, ${a.number}${a.complement ? ' (' + a.complement + ')' : ''} - ${a.district}, ${a.city}/${a.uf}, CEP ${a.cep}`;
+const formatCep = (c) => (/^\d{8}$/.test(String(c)) ? `${String(c).slice(0, 5)}-${String(c).slice(5)}` : String(c));
+const addressLine = (a) => `${a.street}, ${a.number}${a.complement ? ' (' + a.complement + ')' : ''} - ${a.district}, ${a.city}/${a.uf}, CEP ${formatCep(a.cep)}`;
 const brDate = (iso) => iso.split('-').reverse().join('/');
 
 // E-mail curto em pt-BR; sem dado de pagamento.
