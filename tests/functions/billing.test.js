@@ -711,6 +711,25 @@ describe('cadastro, retomada e webhook', () => {
     assert.equal((await get('checkouts/' + other)).status, 'paid');
   });
 
+  it('webhook: reembolso parcial gera alerta e não bloqueia nem muda o status', async () => {
+    const { uid, checkoutId } = await signupOk();
+    await hook(checkoutPaid(uid, checkoutId));
+    const e = payment('pixReceived', checkoutId, { event: 'PAYMENT_PARTIALLY_REFUNDED', paymentId: 'pay_parcial_1' });
+    e.payment.refunds = [{ status: 'DONE', value: 3 }, { status: 'PENDING', value: 9 }];
+    assert.equal((await hook(e)).status, 200);
+    assert.equal((await hook(e)).status, 200); // reenvio do mesmo evento
+    const list = (await alerts()).filter((a) => a.type === 'partial-refund');
+    assert.equal(list.length, 1);
+    assert.equal(list[0].uid, uid);
+    assert.equal(list[0].refunded, 3);
+    assert.equal(list[0].resolved, false);
+    assert.equal((await get('users/' + uid)).access, 'active');
+    assert.equal((await get(`users/${uid}/private/billing`)).status, 'paid');
+    const row = await get('payments/' + checkoutId);
+    assert.equal(row.status, 'paid');
+    assert.equal(row.refunded, 3);
+  });
+
   it('webhook: uid desconhecido responde 200 e gera alerta unknown-uid', async () => {
     assert.equal((await hook(payment('pixReceived', 'checkout-que-nao-existe'))).status, 200);
     assert.equal((await alerts()).length, 0); // checkout desconhecido, sem uid: não é nosso

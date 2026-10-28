@@ -125,6 +125,7 @@ describe('classifyEvent', () => {
       installmentId: null,
       value: null,
       netValue: null,
+      refunded: null,
     });
   });
 
@@ -139,6 +140,7 @@ describe('classifyEvent', () => {
       installmentId: null,
       value: 159,
       netValue: 157.01,
+      refunded: null,
     });
   });
 
@@ -153,6 +155,7 @@ describe('classifyEvent', () => {
       installmentId: '1e7dbfdd-d86d-46dc-82a8-ba347835a5c6',
       value: 13.25,
       netValue: 12.69,
+      refunded: null,
     });
   });
 
@@ -201,7 +204,7 @@ describe('classifyEvent', () => {
   });
 
   it('classifyEvent: evento desconhecido → ignore', () => {
-    const empty = { kind: 'ignore', uid: null, checkoutId: null, paymentId: null, method: null, installments: null, installmentId: null, value: null, netValue: null };
+    const empty = { kind: 'ignore', uid: null, checkoutId: null, paymentId: null, method: null, installments: null, installmentId: null, value: null, netValue: null, refunded: null };
     assert.deepEqual(classifyEvent(events.pixCreated), empty);
     assert.deepEqual(classifyEvent({ event: 'CHECKOUT_EXPIRED', checkout: { id: 'x', externalReference: 'u' } }), empty);
     assert.deepEqual(classifyEvent({ event: 'ALGO_NOVO' }), empty);
@@ -279,5 +282,17 @@ describe('fake-asaas', () => {
     assert.equal(received.length, 1);
     assert.equal(received[0].token, 'token-do-webhook');
     assert.deepEqual(received[0].body, events.pixReceived);
+  });
+});
+
+describe('classifyEvent: reembolso parcial', () => {
+  it('soma só os reembolsos concluídos', () => {
+    const body = { event: 'PAYMENT_PARTIALLY_REFUNDED', payment: { id: 'pay_1', checkoutSession: 'ck_1', billingType: 'PIX', value: 5, netValue: 3.01,
+      refunds: [{ status: 'DONE', value: 1.5 }, { status: 'DONE', value: 1.5 }, { status: 'PENDING', value: 9 }] } };
+    const r = classifyEvent(body);
+    assert.equal(r.kind, 'partial-refund');
+    assert.equal(r.checkoutId, 'ck_1');
+    assert.equal(r.refunded, 3);
+    assert.equal(classifyEvent({ ...body, payment: { ...body.payment, refunds: undefined } }).refunded, null);
   });
 });
