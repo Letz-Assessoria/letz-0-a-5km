@@ -203,10 +203,10 @@ describe('firestore.rules', () => {
     await assertFails(setDoc(doc(db(ALICE), 'payments', 'c3'), { uid: ALICE, status: 'paid' }));
   });
 
-  it('coupons: só admin lê; admin edita só active/maxUses/expiresAt; ninguém cria nem apaga', async () => {
+  it('coupons: só admin lê; admin edita só active/maxUses/expiresAt/percent; ninguém cria nem apaga', async () => {
     await seed(async (f) => {
       await setDoc(doc(f, 'coupons', 'MARIA20'), {
-        code: 'MARIA20', partnerUid: 'p1', partnerName: 'Maria', active: true, maxUses: 20, usedCount: 3,
+        code: 'MARIA20', partnerUid: 'p1', partnerName: 'Maria', active: true, percent: 5, maxUses: 20, usedCount: 3, convertedCount: 1,
         expiresAt: null, createdAt: Timestamp.now(),
       });
       await setDoc(doc(f, 'coupons/MARIA20/uses/u1'), { name: 'Ana', at: Timestamp.now() });
@@ -219,14 +219,21 @@ describe('firestore.rules', () => {
     await assertFails(updateDoc(ref(db(ALICE)), { active: false }));
     await assertFails(updateDoc(ref(anonDb()), { active: false }));
     await assertSucceeds(updateDoc(ref(adminDb()), { active: false }));
-    await assertSucceeds(updateDoc(ref(adminDb()), { maxUses: 30 }));
+    await assertSucceeds(updateDoc(ref(adminDb()), { maxUses: 5000 }));
     await assertSucceeds(updateDoc(ref(adminDb()), { expiresAt: Timestamp.fromMillis(Date.now() + DAY) }));
     await assertSucceeds(updateDoc(ref(adminDb()), { expiresAt: null }));
+    await assertSucceeds(updateDoc(ref(adminDb()), { percent: 50 }));
+    await assertSucceeds(updateDoc(ref(adminDb()), { maxUses: null }));
+    await assertFails(updateDoc(ref(adminDb()), { percent: 51 }));
+    await assertFails(updateDoc(ref(adminDb()), { percent: 0 }));
+    await assertFails(updateDoc(ref(adminDb()), { percent: 5.5 }));
+    await assertFails(updateDoc(ref(adminDb()), { convertedCount: 9 }));
+    await assertSucceeds(updateDoc(ref(adminDb()), { maxUses: 20 }));
     await assertFails(updateDoc(ref(adminDb()), { usedCount: 0 }));
     await assertFails(updateDoc(ref(adminDb()), { code: 'OUTRO' }));
     await assertFails(updateDoc(ref(adminDb()), { partnerUid: 'x' }));
     await assertFails(updateDoc(ref(adminDb()), { maxUses: 0 }));
-    await assertFails(updateDoc(ref(adminDb()), { maxUses: 501 }));
+    await assertFails(updateDoc(ref(adminDb()), { maxUses: 5001 }));
     await assertFails(updateDoc(ref(adminDb()), { maxUses: 2 })); // abaixo de usedCount (3)
     await assertFails(updateDoc(ref(adminDb()), { maxUses: 10.5 }));
     await assertFails(updateDoc(ref(adminDb()), { active: 'sim' }));

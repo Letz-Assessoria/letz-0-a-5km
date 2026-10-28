@@ -22,4 +22,5 @@ exports.onConfigWritten = onDocumentWritten({ document: 'config/app', timeoutSec
 exports.signup = onCall({ secrets: [ASAAS_API_KEY] }, signup.signup);
 exports.resumeCheckout = onCall({ secrets: [ASAAS_API_KEY] }, signup.resumeCheckout);
 exports.createPartner = onCall(partners.createPartner);
+exports.createCoupon = onCall(partners.createCoupon);
 exports.asaasWebhook = onRequest({ secrets: [ASAAS_WEBHOOK_TOKEN] }, webhook.asaasWebhook);

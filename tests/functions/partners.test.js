@@ -3,6 +3,7 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 import { startFakeAsaas } from '../fake-asaas.mjs';
 
 const require = createRequire(new URL('../../functions/package.json', import.meta.url));
@@ -12,6 +13,22 @@ const PROJECT = 'demo-letz';
 const FN = `http://127.0.0.1:5001/${PROJECT}/southamerica-east1`;
 const AUTH = 'http://127.0.0.1:9099';
 const MSG_COUPON = 'Cupom inválido ou esgotado.';
+const events = JSON.parse(readFileSync(new URL('./fixtures/asaas-events.json', import.meta.url), 'utf8'));
+const WEBHOOK_TOKEN = readFileSync(new URL('../../functions/.secret.local', import.meta.url), 'utf8')
+  .split('\n').find((l) => l.startsWith('ASAAS_WEBHOOK_TOKEN=')).split('=')[1].trim();
+const hook = (body) => fetch(`${FN}/asaasWebhook`, {
+  method: 'POST', headers: { 'content-type': 'application/json', 'asaas-access-token': WEBHOOK_TOKEN }, body: JSON.stringify(body),
+});
+function checkoutPaid(uid, checkoutId, id = 'evt_' + Math.random()) {
+  const e = structuredClone(events.checkoutPaidPix);
+  e.id = id; e.checkout.id = checkoutId; e.checkout.externalReference = uid;
+  return e;
+}
+function cardRefund(checkoutId) {
+  const e = structuredClone(events.cardRefunded);
+  e.id = 'evt_' + Math.random(); e.payment.checkoutSession = checkoutId;
+  return e;
+}
 
 admin.initializeApp({ projectId: PROJECT });
 const db = admin.firestore();
@@ -54,14 +71,14 @@ function makeCpf() {
   return base.join('');
 }
 
+const ADDR = { cep: '50050-000', street: 'Rua da Aurora', number: '100', complement: '', district: 'Boa Vista', city: 'Recife', uf: 'PE' };
 function person(extra = {}) {
   seq += 1;
   return {
     name: 'Aluna Cupom ' + seq, email: `cupom${seq}-${Date.now()}@exemplo.com`, password: 'senha-forte-123',
-    cpf: makeCpf(), phone: '(81) 99999-0000', acceptPolicy: true, ...extra,
+    cpf: makeCpf(), phone: '(81) 99999-0000', acceptPolicy: true, address: ADDR, ...extra,
   };
 }
-const ADDR = { cep: '50050-000', street: 'Rua da Aurora', number: '100', complement: '', district: 'Boa Vista', city: 'Recife', uf: 'PE' };
 
 function partnerData(extra = {}) {
   seq += 1;
@@ -70,7 +87,7 @@ function partnerData(extra = {}) {
 
 async function seedCoupon(code, extra = {}) {
   await db.doc('coupons/' + code).set({
-    code, partnerUid: 'p1', partnerName: 'Parceiro', active: true, maxUses: 5, usedCount: 0, expiresAt: null,
+    code, partnerUid: 'p1', partnerName: 'Parceiro', active: true, percent: 5, maxUses: 5, usedCount: 0, convertedCount: 0, expiresAt: null,
     createdAt: admin.firestore.FieldValue.serverTimestamp(), ...extra,
   });
 }
@@ -121,7 +138,9 @@ describe('parceiros e cupons', () => {
       assert.equal(c.partnerName, d.name);
       assert.equal(c.active, true);
       assert.equal(c.maxUses, 7);
+      assert.equal(c.percent, 5);
       assert.equal(c.usedCount, 0);
+      assert.equal(c.convertedCount, 0);
       assert.ok(c.expiresAt.toMillis() > Date.now());
     });
 
@@ -149,9 +168,39 @@ describe('parceiros e cupons', () => {
       await assert.rejects(admin.auth().getUserByEmail(other.email));
     });
 
+    it('createCoupon: admin cria outro cupom para o mesmo parceiro; validações e permissões', async () => {
+      const token = await makeUserToken(true);
+      const pr = await call('createPartner', partnerData({ code: 'BASE0001' }), token);
+      const uid = pr.result.uid;
+      const r = await call('createCoupon', { partnerUid: uid, code: 'segundo2', maxUses: 5000 }, token);
+      assert.equal(r.error, undefined, JSON.stringify(r.error));
+      const c = await get('coupons/SEGUNDO2');
+      assert.equal(c.partnerUid, uid);
+      assert.equal(c.maxUses, 5000);
+      assert.equal(c.usedCount, 0);
+      assert.equal((await db.collection('users').get()).size, 1);
+      // padrão de 100 usos
+      assert.equal((await call('createCoupon', { partnerUid: uid, code: 'TERCEIRO' }, token)).error, undefined);
+      assert.equal((await get('coupons/TERCEIRO')).maxUses, 1000);
+      assert.equal((await get('coupons/TERCEIRO')).percent, 5);
+      assert.equal((await call('createCoupon', { partnerUid: uid, code: 'SEMLIM01', maxUses: null, percent: 10 }, token)).error, undefined);
+      assert.equal((await get('coupons/SEMLIM01')).maxUses, null);
+      assert.equal((await get('coupons/SEMLIM01')).percent, 10);
+      assert.equal((await call('createCoupon', { partnerUid: uid, code: 'SEGUNDO2' }, token)).error.status, 'ALREADY_EXISTS');
+      assert.equal((await call('createCoupon', { partnerUid: 'naoexiste', code: 'QUARTO01' }, token)).error.status, 'INVALID_ARGUMENT');
+      assert.equal((await call('createCoupon', { partnerUid: uid, code: 'QUARTO01', maxUses: 5001 }, token)).error.status, 'INVALID_ARGUMENT');
+      assert.equal((await call('createCoupon', { partnerUid: uid, code: 'QUARTO01', percent: 51 }, token)).error.status, 'INVALID_ARGUMENT');
+      assert.equal((await call('createCoupon', { partnerUid: uid, code: 'QUARTO01' }, await makeUserToken(false))).error.status, 'PERMISSION_DENIED');
+      assert.equal((await call('createCoupon', { partnerUid: uid, code: 'QUARTO01' })).error.status, 'UNAUTHENTICATED');
+      const p = person({ coupon: 'SEGUNDO2' });
+      assert.equal((await call('signup', p)).error, undefined);
+      const u = await admin.auth().getUserByEmail(p.email);
+      assert.equal((await get(`coupons/SEGUNDO2/uses/${u.uid}`)).partnerUid, uid);
+    });
+
     it('valida código, limite e validade', async () => {
       const token = await makeUserToken(true);
-      for (const bad of [{ code: 'abc' }, { code: 'tem espaço' }, { maxUses: 0 }, { maxUses: 501 }, { maxUses: 1.5 }, { expiresAt: '2001-01-01' }, { email: 'x' }]) {
+      for (const bad of [{ code: 'abc' }, { code: 'tem espaço' }, { maxUses: 0 }, { maxUses: 5001 }, { percent: 0 }, { percent: 51 }, { percent: 2.5 }, { maxUses: 1.5 }, { expiresAt: '2001-01-01' }, { email: 'x' }]) {
         const r = await call('createPartner', partnerData(bad), token);
         assert.equal(r.error && r.error.status, 'INVALID_ARGUMENT', JSON.stringify(bad));
       }
@@ -174,50 +223,65 @@ describe('parceiros e cupons', () => {
     });
   });
 
-  describe('signup com cupom', () => {
-    it('cupom válido ativa sem checkout, sem Asaas, incrementa e grava uso; sem endereço', async () => {
-      await seedCoupon('AMIGO10');
-      const p = person({ coupon: ' amigo10 ' });
+  describe('signup com cupom de desconto', () => {
+    const sent = async () => checkouts();
+    async function signupCoupon(code, extra = {}) {
+      const p = person({ coupon: code, ...extra });
       const r = await call('signup', p);
       assert.equal(r.error, undefined, JSON.stringify(r.error));
-      assert.deepEqual(r.result, { checkoutUrl: null, courtesy: true });
-      assert.deepEqual(await checkouts(), []);
       const user = await admin.auth().getUserByEmail(p.email);
-      const u = await get('users/' + user.uid);
-      assert.equal(u.access, 'active');
       const billing = await get(`users/${user.uid}/private/billing`);
-      assert.equal(billing.status, 'courtesy');
+      return { p, uid: user.uid, billing, url: r.result.checkoutUrl };
+    }
+
+    it('cupom válido abre checkout com desconto e registra o cadastro (signed-up)', async () => {
+      await seedCoupon('AMIGO10');
+      const { p, uid, billing, url } = await signupCoupon(' amigo10 ');
+      assert.match(url, /^http:\/\/127\.0\.0\.1:7777\/checkoutSession\/show\//);
+      const list = await sent();
+      assert.equal(list.length, 1);
+      assert.equal(list[0].items[0].value, 151.05);
+      assert.equal(list[0].installment.maxInstallmentCount, 12);
+      assert.equal((await get('users/' + uid)).access, 'pending');
+      assert.equal(billing.status, 'pending');
       assert.equal(billing.coupon, 'AMIGO10');
-      assert.equal(billing.partnerUid, 'p1');
-      const prof = await get(`users/${user.uid}/private/profile`);
-      assert.equal(prof.address, undefined);
-      assert.equal(prof.cpf, p.cpf);
-      assert.equal((await get('coupons/AMIGO10')).usedCount, 1);
-      const use = await get(`coupons/AMIGO10/uses/${user.uid}`);
+      assert.equal(billing.percent, 5);
+      assert.equal(billing.value, 151.05);
+      const co = await get('checkouts/' + billing.checkoutId);
+      assert.deepEqual([co.coupon, co.percent, co.value], ['AMIGO10', 5, 151.05]);
+      const c = await get('coupons/AMIGO10');
+      assert.equal(c.usedCount, 1);
+      assert.equal(c.convertedCount, 0);
+      const use = await get(`coupons/AMIGO10/uses/${uid}`);
+      assert.equal(use.status, 'signed-up');
       assert.equal(use.name, p.name);
+      assert.equal(use.partnerUid, 'p1');
       assert.ok(use.at);
-      assert.equal((await get('cpfs/' + p.cpf)).uid, user.uid);
     });
 
-    it('cupom com endereço informado guarda o endereço', async () => {
-      await seedCoupon('AMIGO11');
-      const p = person({ coupon: 'AMIGO11', address: ADDR });
-      assert.equal((await call('signup', p)).error, undefined);
-      const user = await admin.auth().getUserByEmail(p.email);
-      assert.equal((await get(`users/${user.uid}/private/profile`)).address.city, 'Recife');
+    it('percentual configurável: 10% dá 143.10', async () => {
+      await seedCoupon('DEZ10000', { percent: 10 });
+      const { billing } = await signupCoupon('DEZ10000');
+      assert.equal(billing.value, 143.1);
+      assert.equal((await sent())[0].items[0].value, 143.1);
     });
 
-    it('sem cupom, endereço ausente continua sendo erro', async () => {
-      const r = await call('signup', person());
+    it('sem cupom o valor continua 159 e o endereço continua obrigatório', async () => {
+      const ok = await call('signup', person());
+      assert.equal(ok.error, undefined);
+      assert.equal((await sent())[0].items[0].value, 159);
+      const r = await call('signup', person({ address: undefined }));
       assert.equal(r.error.status, 'INVALID_ARGUMENT');
-      assert.match(r.error.message, /endereço/);
+      const r2 = await call('signup', person({ address: undefined, coupon: 'AMIGO10' }));
+      assert.equal(r2.error.status, 'INVALID_ARGUMENT');
+      assert.match(r2.error.message, /endereço/);
     });
 
-    it('inexistente, inativo, vencido e esgotado dão a mesma mensagem e não deixam conta nem CPF', async () => {
+    it('inexistente, inativo, vencido e esgotado dão a mesma mensagem e nada é criado', async () => {
       await seedCoupon('INATIVO1', { active: false });
       await seedCoupon('VENCIDO1', { expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() - 1000) });
       await seedCoupon('ESGOTAD1', { maxUses: 2, usedCount: 2 });
-      for (const code of ['NAOEXIST', 'INATIVO1', 'VENCIDO1', 'ESGOTAD1']) {
+      for (const code of ['NAOEXIST', 'INATIVO1', 'VENCIDO1', 'ESGOTAD1', 'a b']) {
         const p = person({ coupon: code });
         const r = await call('signup', p);
         assert.equal(r.error && r.error.message, MSG_COUPON, code);
@@ -226,11 +290,12 @@ describe('parceiros e cupons', () => {
       }
       assert.equal((await get('coupons/ESGOTAD1')).usedCount, 2);
       assert.equal((await db.collection('users').get()).size, 0);
+      assert.deepEqual(await sent(), []);
     });
 
-    it('formato de cupom inválido dá a mesma mensagem', async () => {
-      const r = await call('signup', person({ coupon: 'a b' }));
-      assert.equal(r.error.message, MSG_COUPON);
+    it('cupom sem limite (maxUses null) não esgota', async () => {
+      await seedCoupon('SEMLIM01', { maxUses: null, usedCount: 9999 });
+      await signupCoupon('SEMLIM01');
     });
 
     it('dois cadastros simultâneos com maxUses 1: exatamente um vence', async () => {
@@ -245,33 +310,74 @@ describe('parceiros e cupons', () => {
 
     it('CPF repetido continua barrado e não consome o cupom', async () => {
       await seedCoupon('AMIGO20');
-      const first = person({ coupon: 'AMIGO20' });
-      assert.equal((await call('signup', first)).error, undefined);
-      const again = person({ coupon: 'AMIGO20', cpf: first.cpf });
-      const r = await call('signup', again);
+      const { p } = await signupCoupon('AMIGO20');
+      const r = await call('signup', person({ coupon: 'AMIGO20', cpf: p.cpf }));
       assert.equal(r.error.status, 'ALREADY_EXISTS');
       assert.equal((await get('coupons/AMIGO20')).usedCount, 1);
       assert.equal((await db.collection('coupons/AMIGO20/uses').get()).size, 1);
     });
 
-    it('falha ao gravar a conta com cupom não consome o cupom nem deixa Auth/CPF', async () => {
+    it('falha ao gravar a conta não consome o cupom nem deixa Auth/CPF', async () => {
       await seedCoupon('AMIGO30');
       await db.doc('testFaults/signup').set({ failBatch: true });
       const p = person({ coupon: 'AMIGO30' });
-      const r = await call('signup', p);
-      assert.equal(r.error.status, 'INTERNAL');
+      assert.equal((await call('signup', p)).error.status, 'INTERNAL');
       assert.equal((await get('coupons/AMIGO30')).usedCount, 0);
       await assert.rejects(admin.auth().getUserByEmail(p.email));
       assert.equal((await db.doc('cpfs/' + p.cpf).get()).exists, false);
     });
 
-    it('resumeCheckout recusa conta cortesia', async () => {
-      await seedCoupon('AMIGO40');
-      const p = person({ coupon: 'AMIGO40' });
-      assert.equal((await call('signup', p)).error, undefined);
+    it('resumeCheckout reabre com o mesmo valor, mesmo com o cupom desativado depois', async () => {
+      await seedCoupon('AMIGO40', { percent: 10 });
+      const { p, uid, billing } = await signupCoupon('AMIGO40');
+      await db.doc('coupons/AMIGO40').update({ active: false, percent: 50 });
+      // força a reabertura: checkout salvo vencido
+      await db.doc(`users/${uid}/private/billing`).update({ expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() - 1000) });
       const r = await call('resumeCheckout', {}, await signIn(p.email, p.password));
-      assert.equal(r.error.status, 'FAILED_PRECONDITION');
-      assert.deepEqual(await checkouts(), []);
+      assert.equal(r.error, undefined, JSON.stringify(r.error));
+      const list = await sent();
+      assert.equal(list.length, 2);
+      assert.equal(list[1].items[0].value, 143.1);
+      const after = await get(`users/${uid}/private/billing`);
+      assert.equal(after.value, 143.1);
+      assert.notEqual(after.checkoutId, billing.checkoutId);
+      assert.equal((await get('checkouts/' + after.checkoutId)).coupon, 'AMIGO40');
+    });
+
+    it('webhook: pago converte uma vez só, grava payments com desconto e cupom; refund marca refunded', async () => {
+      await seedCoupon('AMIGO50');
+      const { uid, billing } = await signupCoupon('AMIGO50');
+      const ev = checkoutPaid(uid, billing.checkoutId);
+      assert.equal((await hook(ev)).status, 200);
+      assert.equal((await hook(ev)).status, 200); // repetido (mesmo id)
+      assert.equal((await hook(checkoutPaid(uid, billing.checkoutId))).status, 200); // outro id, mesmo checkout
+      const use = await get(`coupons/AMIGO50/uses/${uid}`);
+      assert.equal(use.status, 'converted');
+      assert.ok(use.convertedAt);
+      assert.equal(use.value, 151.05);
+      assert.equal((await get('coupons/AMIGO50')).convertedCount, 1);
+      assert.equal((await get('users/' + uid)).access, 'active');
+      const pay = await get('payments/' + billing.checkoutId);
+      assert.equal(pay.gross, 151.05);
+      assert.equal(pay.coupon, 'AMIGO50');
+      assert.equal(pay.percent, 5);
+      assert.equal((await hook(cardRefund(billing.checkoutId))).status, 200);
+      const use2 = await get(`coupons/AMIGO50/uses/${uid}`);
+      assert.equal(use2.status, 'refunded');
+      assert.equal((await get('coupons/AMIGO50')).convertedCount, 0);
+      assert.equal((await get('users/' + uid)).access, 'blocked');
+    });
+
+    it('webhook: compra sem cupom não mexe em cupons', async () => {
+      await seedCoupon('AMIGO60');
+      const p = person();
+      assert.equal((await call('signup', p)).error, undefined);
+      const user = await admin.auth().getUserByEmail(p.email);
+      const b = await get(`users/${user.uid}/private/billing`);
+      assert.equal((await hook(checkoutPaid(user.uid, b.checkoutId))).status, 200);
+      assert.equal((await get('coupons/AMIGO60')).convertedCount, 0);
+      assert.equal((await get('payments/' + b.checkoutId)).gross, 159);
+      assert.equal((await get('payments/' + b.checkoutId)).coupon, undefined);
     });
   });
 });

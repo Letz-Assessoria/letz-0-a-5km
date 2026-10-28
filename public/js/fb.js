@@ -426,11 +426,12 @@ async function saveConfig(patch) {
 function athleteRow(uid, u, p, b, sh) {
   return {
     uid, name: u.name || '', handle: u.handle || '', access: u.access || 'pending',
-    points: Number(u.points) || 0, done: Number(u.done) || 0, createdAt: ms(u.createdAt),
+    points: Number(u.points) || 0, done: Number(u.done) || 0, createdAt: ms(u.createdAt), profiled: u.profiled === true,
     email: (p && p.email) || '', phone: (p && p.phone) || '',
     billing: b ? {
       status: b.status || 'pending', method: b.method || '', installments: Number(b.installments) || 0,
       paidAt: ms(b.paidAt), duplicate: !!b.duplicate, cpfConflict: !!b.cpfConflict,
+      coupon: b.coupon || '', percent: Number(b.percent) || 0, value: typeof b.value === 'number' ? b.value : null, partner: b.partner === true,
     } : null,
     ship: sh ? { ...sh, at: ms(sh.at), paidAt: ms(sh.paidAt), paid: ms(sh.paidAt) || 0 } : null,
   };
@@ -489,11 +490,63 @@ function listPayments(cb) {
         checkoutId: d.id, uid: x.uid || '', status: x.status || '', method: x.method || '',
         installments: Number(x.installments) || 0, gross: Number(x.gross) || 0,
         net: typeof x.net === 'number' ? x.net : null, product: x.product || '',
+        coupon: x.coupon || '', percent: Number(x.percent) || 0,
         paidAt: ms(x.paidAt), updatedAt: ms(x.updatedAt),
       };
     })),
     (err) => { fail(err); cb([]); },
   ));
+}
+// Parceiros e cupons (admin). createPartner/createCoupon são callables; a lista é ao vivo.
+const callCreatePartner = httpsCallable(functions, 'createPartner');
+const callCreateCoupon = httpsCallable(functions, 'createCoupon');
+async function createPartner(data) {
+  const r = await callCreatePartner(data);
+  return { uid: r.data.uid, code: r.data.code, resetLink: r.data.resetLink };
+}
+async function createCoupon(data) {
+  const r = await callCreateCoupon(data);
+  return { code: r.data.code };
+}
+function listCoupons(cb) {
+  return whenSession((s) => !!(s && s.user && s.claims && s.claims.admin === true), () => onSnapshot(
+    collection(db, 'coupons'),
+    (snap) => cb(snap.docs.map((d) => {
+      const x = d.data();
+      return {
+        code: d.id, partnerUid: x.partnerUid || '', partnerName: x.partnerName || '', active: x.active === true,
+        percent: Number(x.percent) || 0, maxUses: typeof x.maxUses === 'number' ? x.maxUses : null,
+        usedCount: Number(x.usedCount) || 0, convertedCount: Number(x.convertedCount) || 0,
+        expiresAt: ms(x.expiresAt), createdAt: ms(x.createdAt),
+      };
+    }).sort((a, c) => (c.createdAt || 0) - (a.createdAt || 0))),
+    (err) => { fail(err); cb([]); },
+  ));
+}
+async function listCouponUses(code) {
+  const snap = await getDocs(collection(db, 'coupons', String(code), 'uses'));
+  return snap.docs.map((d) => {
+    const x = d.data();
+    return {
+      uid: d.id, name: x.name || '', partnerUid: x.partnerUid || '', at: ms(x.at),
+      status: x.status || 'signed-up', convertedAt: ms(x.convertedAt), refundedAt: ms(x.refundedAt),
+    };
+  }).sort((a, c) => (c.at || 0) - (a.at || 0));
+}
+async function setCouponActive(code, active) {
+  await updateDoc(doc(db, 'coupons', String(code)), { active: !!active });
+}
+async function setCouponMax(code, n) {
+  // Em branco = sem limite.
+  const blank = n === null || n === undefined || String(n).trim() === '';
+  const v = blank ? null : Number(n);
+  if (!blank && (!Number.isInteger(v) || v < 1 || v > 5000)) throw new Error('limite inválido');
+  await updateDoc(doc(db, 'coupons', String(code)), { maxUses: v });
+}
+async function setCouponPercent(code, n) {
+  const v = Number(n);
+  if (!Number.isInteger(v) || v < 1 || v > 50) throw new Error('desconto inválido');
+  await updateDoc(doc(db, 'coupons', String(code)), { percent: v });
 }
 async function resolveAlert(id) {
   await updateDoc(doc(db, 'alerts', id), { resolved: true });
@@ -524,6 +577,6 @@ window.LetzFB = {
   watchMyPosts, watchFeed, loadMoreFeed, watchRanking, watchConfig,
   loadMyReactions, toggleReaction, addComment, deleteComment, watchComments,
   saveShip, watchShip,
-  saveConfig, listAthletes, listAlerts, listPayments, resolveAlert, setAccess, setPostHidden, setCommentHidden, setShipPaid, setTrack,
+  saveConfig, listAthletes, listAlerts, listPayments, resolveAlert, createPartner, createCoupon, listCoupons, listCouponUses, setCouponActive, setCouponMax, setCouponPercent, setAccess, setPostHidden, setCommentHidden, setShipPaid, setTrack,
 };
 document.dispatchEvent(new Event('letzfb-ready'));
