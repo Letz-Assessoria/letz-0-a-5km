@@ -107,14 +107,14 @@ export async function clearRateLimits() {
   await db.recursiveDelete(db.collection('rateLimits'));
 }
 
-// Aluno com 24 treinos incluindo o 10-2 (medalha liberada), gravados pelo Admin SDK.
+// Aluno que concluiu: 24 treinos incluindo 10-0, 10-1 e 10-2 (medalha liberada), gravados pelo Admin SDK.
 export async function seedConcluded(u) {
   const keys = [];
   for (let w = 1; w <= 7; w++) for (let d = 0; d < 3; d++) keys.push([w, d]);
-  keys.push([8, 0], [8, 1], [10, 2], [9, 0], [9, 1], [9, 2]);
+  keys.push([10, 0], [10, 1], [10, 2]);
   const base = Date.now() - 60 * 864e5;
   let i = 0;
-  for (const [w, d] of keys.slice(0, 24)) {
+  for (const [w, d] of keys) {
     i += 1;
     await db.doc(`posts/${u.uid}_${w}-${d}`).set({
       uid: u.uid, handle: u.handle, name: u.name, photoURL: '', w, d,
