@@ -1,6 +1,6 @@
 // E-mail transacional da Letz, via SMTP do Gmail (senha de app no secret GMAIL_APP_PASSWORD).
-// Nunca lança: falha vira log e { sent: false }. Sem o secret, só o emulador usa um transporte
-// falso (guarda a última mensagem em memória para os testes); em produção devolve
+// Nunca lança: falha vira log e { sent: false }. O emulador sempre usa um transporte falso
+// (guarda a última mensagem para os testes); em produção, sem o secret, devolve
 // { sent: false, reason: 'not-configured' }, para ninguém achar que o e-mail saiu.
 const nodemailer = require('nodemailer');
 const logger = require('firebase-functions/logger');
@@ -30,18 +30,19 @@ async function sendMail({ to, subject, text } = {}) {
   try {
     if (!to || !subject || !text) throw new Error('mailer: to, subject e text obrigatórios');
     if (inEmulator() && (await getFirestore().doc('testFaults/mail').get()).get('fail') === true) throw new Error('mailer: falha injetada');
+    // O emulador nunca envia e-mail de verdade, mesmo com um secret falso.
+    if (inEmulator()) {
+      lastFake = { from: FROM, to, subject, text };
+      await getFirestore().doc('testMail/last').set({ ...lastFake, n: FieldValue.increment(1) }, { merge: true });
+      return { sent: true, fake: true };
+    }
     const pass = appPassword();
-    if (!pass && !inEmulator()) {
+    if (!pass) {
       if (!warnedNotConfigured) {
         warnedNotConfigured = true;
         logger.warn('mailer: GMAIL_APP_PASSWORD não configurado; e-mails não serão enviados');
       }
       return { sent: false, reason: 'not-configured' };
-    }
-    if (!pass) {
-      lastFake = { from: FROM, to, subject, text };
-      await getFirestore().doc('testMail/last').set({ ...lastFake, n: FieldValue.increment(1) }, { merge: true });
-      return { sent: true, fake: true };
     }
     const transport = nodemailer.createTransport({
       host: 'smtp.gmail.com', port: 465, secure: true, auth: { user: SMTP_USER, pass },
