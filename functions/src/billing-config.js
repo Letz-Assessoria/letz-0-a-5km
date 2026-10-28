@@ -17,7 +17,20 @@ function asaasClient() {
   return createClient({ baseUrl: ASAAS_BASE_URL.value(), apiKey: ASAAS_API_KEY.value() });
 }
 
-function checkoutArgs(uid) {
+// Dados do cadastro para o checkout do Asaas abrir já preenchido. Sem endereço (conta antiga),
+// devolve undefined e o Asaas pede tudo na própria página.
+function customerDataOf(name, profile) {
+  const a = profile && profile.address;
+  if (!a || !profile.cpf || !profile.email || !profile.phone || !name) return undefined;
+  const data = {
+    name, cpfCnpj: profile.cpf, email: profile.email, phone: profile.phone,
+    address: a.street, addressNumber: a.number, province: a.district, postalCode: a.cep, city: a.city,
+  };
+  if (a.complement) data.complement = a.complement;
+  return data;
+}
+
+function checkoutArgs(uid, customerData) {
   const app = APP_URL.value().replace(/\/+$/, '');
   return {
     uid,
@@ -27,7 +40,8 @@ function checkoutArgs(uid) {
     cancelUrl: `${app}/#/aguardando`,
     expiredUrl: `${app}/#/aguardando`,
     minutesToExpire: MINUTES_TO_EXPIRE,
+    customerData,
   };
 }
 
-module.exports = { ASAAS_API_KEY, ASAAS_WEBHOOK_TOKEN, PROGRAM_PRICE, asaasClient, checkoutArgs };
+module.exports = { ASAAS_API_KEY, ASAAS_WEBHOOK_TOKEN, PROGRAM_PRICE, asaasClient, checkoutArgs, customerDataOf };

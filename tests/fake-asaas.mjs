@@ -107,6 +107,7 @@ export function startFakeAsaas({ port = Number(process.env.FAKE_ASAAS_PORT) || 7
             chargeTypes: b.chargeTypes ?? [],
             callback: b.callback ?? null,
             installment: b.installment ?? null,
+            customerData: b.customerData ?? null,
             items: (b.items || []).map(({ imageBase64, ...rest }) => rest),
           };
           state.checkouts.set(id, checkout);

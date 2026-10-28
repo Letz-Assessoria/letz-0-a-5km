@@ -26,7 +26,7 @@ test('privacidade menciona Asaas, cadastro e conta com senha', async ({ page }) 
   await page.goto('/#/privacidade');
   const texto = await page.locator('body').innerText();
   expect(texto.toLowerCase()).toContain('atualizada em 28 de outubro de 2026');
-  expect(texto).toContain('nome, e-mail, CPF e celular informados no cadastro');
+  expect(texto).toContain('nome, e-mail, CPF, celular e endereço informados no cadastro');
   expect(texto).toContain('e-mail e senha da sua conta');
   expect(texto).toContain('Asaas, que processa os pagamentos (Pix e cartão)');
 });

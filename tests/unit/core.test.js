@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const core = createRequire(import.meta.url)('../../public/lib/core.js');
-const { WEEK_MS, weekOpen, weekIndex, pointedKeys, pointsFor, isConcluded, isValidCpf, normalizeCpf, normalizePhone, cleanHandle } = core;
+const { WEEK_MS, weekOpen, weekIndex, pointedKeys, pointsFor, isConcluded, isValidCpf, normalizeCpf, normalizePhone, normalizeCep, cleanAddress, cleanHandle } = core;
 const start = Date.parse('2026-11-08T18:00:00-03:00');
 
 test('pointsFor: 4 marcações na semana 1 dão 9 pontos e 4 feitos', () => {
@@ -55,4 +55,16 @@ test('projectForHost: dev, preview de dev, prod, preview de prod, domínio próp
   assert.equal(core.projectForHost('www.exemplo.com.br'), 'prod');
   assert.equal(core.projectForHost('localhost'), 'local');
   assert.equal(core.projectForHost('127.0.0.1'), 'local');
+});
+
+test('normalizeCep e cleanAddress', () => {
+  assert.equal(normalizeCep('50050-000'), '50050000');
+  assert.equal(normalizeCep('5005'), null);
+  const ok = { cep: '50050-000', street: ' Rua  da Aurora ', number: '100', complement: '', district: 'Boa Vista', city: 'Recife', uf: 'pe' };
+  assert.deepEqual(cleanAddress(ok), { cep: '50050000', street: 'Rua da Aurora', number: '100', complement: '', district: 'Boa Vista', city: 'Recife', uf: 'PE' });
+  assert.equal(cleanAddress({ ...ok, number: '' }), null);
+  assert.equal(cleanAddress({ ...ok, uf: 'PER' }), null);
+  assert.equal(cleanAddress({ ...ok, cep: '123' }), null);
+  assert.equal(cleanAddress({ ...ok, street: 'x'.repeat(101) }), null);
+  assert.equal(cleanAddress(null), null);
 });

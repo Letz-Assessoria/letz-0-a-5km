@@ -57,7 +57,24 @@ export function person() {
     password: 'senha-forte-123',
     cpf: makeCpf(),
     phone: '(81) 99999-0000',
+    address: { cep: '50050-000', street: 'Rua da Aurora', number: '100', complement: '', district: 'Boa Vista', city: 'Recife', uf: 'PE' },
   };
+}
+
+// ViaCEP é externo: responde sempre o mesmo endereço, ou "erro" para o CEP 00000-000.
+export async function mockViaCep(page) {
+  await page.route('https://viacep.com.br/**', (route) => {
+    const cep = route.request().url().match(/ws\/(\d{8})/)?.[1];
+    const body = cep === '00000000' ? { erro: true }
+      : { cep, logradouro: 'Rua da Aurora', bairro: 'Boa Vista', localidade: 'Recife', uf: 'PE' };
+    return route.fulfill({ contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(body) });
+  });
+}
+
+// Preenche o endereço do cadastro pela tela (CEP achado → só o número).
+export async function fillAddress(page, p) {
+  await page.getByLabel('CEP').fill(p.address.cep);
+  await page.getByLabel('Número').fill(p.address.number);
 }
 
 // Chama um callable pelo protocolo HTTP (sem o SDK Web).

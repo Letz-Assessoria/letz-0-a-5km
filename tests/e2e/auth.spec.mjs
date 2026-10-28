@@ -2,7 +2,7 @@
 // pendente/bloqueado, guarda de rotas e textos das telas de entrada.
 import { test, expect } from '@playwright/test';
 import {
-  auth, callable, checkoutPaid, clearRateLimits, makeCoach, makeUser, person, webhookToken, FAKE, WEBHOOK,
+  auth, callable, checkoutPaid, clearRateLimits, fillAddress, makeCoach, makeUser, mockViaCep, person, webhookToken, FAKE, WEBHOOK,
 } from './helpers.mjs';
 
 const CHECKOUT_URL = /^http:\/\/127\.0\.0\.1:7777\/checkoutSession\/show\/[^/]+$/;
@@ -26,6 +26,7 @@ async function login(page, email, password) {
 
 test('cadastro → checkout fake → webhook pago → app', async ({ page }) => {
   const p = person();
+  await mockViaCep(page);
   await page.goto('/');
   await page.locator('[data-act="buy"]').first().click();
   await expect(page).toHaveURL(/#\/cadastro$/);
@@ -34,6 +35,7 @@ test('cadastro → checkout fake → webhook pago → app', async ({ page }) => 
   await page.getByLabel('E-mail').fill(p.email);
   await page.getByLabel('CPF').fill(p.cpf);
   await page.getByLabel('Celular com DDD').fill(p.phone);
+  await fillAddress(page, p);
   await page.getByLabel('Senha', { exact: true }).fill(p.password);
   await page.getByLabel('Confirme a senha').fill(p.password);
   await page.getByLabel(/Li e aceito a política de privacidade/).check();
@@ -63,11 +65,13 @@ test('cadastro com o Asaas fora do ar entra e mostra Concluir pagamento', async 
   const p = person();
   await fetch(`${FAKE}/__fail`, { method: 'POST', body: JSON.stringify({ checkouts: true }) });
   try {
+    await mockViaCep(page);
     await page.goto('/#/cadastro');
     await page.getByLabel('Nome completo').fill(p.name);
     await page.getByLabel('E-mail').fill(p.email);
     await page.getByLabel('CPF').fill(p.cpf);
     await page.getByLabel('Celular com DDD').fill(p.phone);
+    await fillAddress(page, p);
     await page.getByLabel('Senha', { exact: true }).fill(p.password);
     await page.getByLabel('Confirme a senha').fill(p.password);
     await page.getByLabel(/Li e aceito a política de privacidade/).check();
@@ -151,4 +155,39 @@ test('não existe texto "Kiwify", "teste" ou "Simular" nas telas de entrada', as
     const text = await page.locator('#app').innerText();
     expect(text, route).not.toMatch(/kiwify|\bteste\b|simular|código de acesso/i);
   }
+});
+
+test('cadastro: endereço aparece por etapas e aceita CEP não encontrado', async ({ page }) => {
+  await mockViaCep(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/#/cadastro');
+  // De início só o CEP: nada de rua, bairro, número.
+  await expect(page.getByLabel('CEP')).toBeVisible();
+  await expect(page.getByLabel('Número')).toHaveCount(0);
+  await expect(page.getByLabel('Rua ou avenida')).toHaveCount(0);
+
+  // CEP achado: uma linha de conferência e só o número a preencher.
+  await page.getByLabel('CEP').fill('50050000');
+  await expect(page.getByLabel('Número')).toBeVisible();
+  await expect(page.getByLabel('Número')).toBeFocused();
+  await expect(page.locator('.addrline')).toContainText('Rua da Aurora · Boa Vista · Recife/PE');
+  await expect(page.getByLabel('Rua ou avenida')).toHaveCount(0);
+  await expect(page.getByLabel('CEP')).toHaveValue('50050-000');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.locator('#f-signup').screenshot({ path: 'test-results/cadastro-endereco-390.png' });
+
+  // "Corrigir" abre os campos completos, já preenchidos.
+  await page.getByRole('button', { name: 'Corrigir' }).click();
+  await expect(page.getByLabel('Rua ou avenida')).toHaveValue('Rua da Aurora');
+  await expect(page.getByLabel('Bairro')).toHaveValue('Boa Vista');
+
+  // CEP que o ViaCEP não conhece: campos completos vazios para preencher à mão.
+  await page.getByLabel('CEP').fill('00000000');
+  await expect(page.getByText(/CEP não encontrado/)).toBeVisible();
+  await expect(page.getByLabel('Rua ou avenida')).toBeVisible();
+
+  // Sem número, o envio para antes de chamar o servidor.
+  await page.getByLabel('Nome completo').fill('Aluna Teste');
+  await page.getByRole('button', { name: /Criar conta e ir para o pagamento/ }).click();
+  await expect(page.getByRole('alert')).toBeVisible();
 });

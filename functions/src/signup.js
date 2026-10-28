@@ -6,7 +6,7 @@ const logger = require('firebase-functions/logger');
 const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
 const core = require('../shared/core.js');
-const { asaasClient, checkoutArgs } = require('./billing-config.js');
+const { asaasClient, checkoutArgs, customerDataOf } = require('./billing-config.js');
 const { safeErr } = require('./safe.js');
 
 // Uma só mensagem para CPF e e-mail repetidos: não revela qual dos dois existe.
@@ -45,8 +45,10 @@ function validate(data) {
   const cpf = core.normalizeCpf(d.cpf);
   const phone = typeof d.phone === 'string' ? core.normalizePhone(d.phone) : null;
   if (!phone) throw bad('Informe um celular com DDD.');
+  const address = core.cleanAddress(d.address);
+  if (!address) throw bad('Confira o endereço: CEP, rua, número, bairro, cidade e estado.');
   if (d.acceptPolicy !== true) throw bad('É preciso aceitar a política de privacidade.');
-  return { name, email, password, cpf, phone };
+  return { name, email, password, cpf, phone, address };
 }
 
 // Falhas injetáveis só no emulador (testes): testFaults/{name}.
@@ -286,7 +288,9 @@ async function cleanupAmbiguousCreate(db, uid, email) {
 // Abre um checkout no Asaas e grava checkouts/{id} e o billing, se ainda pendente.
 // Se o billing deixou de estar pendente (pagamento chegou no meio), cancela o novo checkout.
 async function openCheckout(db, uid) {
-  const checkout = await asaasClient().createCheckout(checkoutArgs(uid));
+  const [userDoc, profileDoc] = await Promise.all([db.doc('users/' + uid).get(), db.doc(`users/${uid}/private/profile`).get()]);
+  const customerData = customerDataOf(userDoc.get('name'), profileDoc.exists ? profileDoc.data() : null);
+  const checkout = await asaasClient().createCheckout(checkoutArgs(uid, customerData));
   const expiresAt = Timestamp.fromDate(new Date(checkout.expiresAt));
   const billingRef = db.doc(`users/${uid}/private/billing`);
   const saved = await db.runTransaction(async (tx) => {
@@ -315,7 +319,7 @@ async function openCheckout(db, uid) {
 }
 
 async function signup(request) {
-  const { name, email, password, cpf, phone } = validate(request.data);
+  const { name, email, password, cpf, phone, address } = validate(request.data);
   const db = getFirestore();
   await rateLimit(db, request);
 
@@ -367,7 +371,7 @@ async function signup(request) {
     name, handle: '', photoURL: '', profiled: false, welcomed: false,
     access: 'pending', points: 0, done: 0, createdAt: now,
   });
-  batch.set(db.doc(`users/${uid}/private/profile`), { email, cpf, phone, policyAcceptedAt: now });
+  batch.set(db.doc(`users/${uid}/private/profile`), { email, cpf, phone, address, policyAcceptedAt: now });
   batch.set(db.doc(`users/${uid}/private/billing`), {
     checkoutId: null, url: null, expiresAt: null, status: 'pending', updatedAt: now,
   });

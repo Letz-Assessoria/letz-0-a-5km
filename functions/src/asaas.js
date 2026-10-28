@@ -59,7 +59,7 @@ function createClient({ baseUrl, apiKey, fetchImpl } = {}) {
     return data;
   }
 
-  async function createCheckout({ uid, value, maxInstallments, successUrl, cancelUrl, expiredUrl, minutesToExpire } = {}) {
+  async function createCheckout({ uid, value, maxInstallments, successUrl, cancelUrl, expiredUrl, minutesToExpire, customerData } = {}) {
     if (typeof uid !== 'string' || !uid) throw new Error('asaas: uid obrigatório');
     if (typeof value !== 'number' || !(value > 0)) throw new Error('asaas: value inválido');
     if (!Number.isInteger(maxInstallments) || maxInstallments < 1 || maxInstallments > 12) {
@@ -90,6 +90,8 @@ function createClient({ baseUrl, apiKey, fetchImpl } = {}) {
       ],
     };
     if (maxInstallments > 1) body.installment = { maxInstallmentCount: maxInstallments };
+    // Com customerData o Asaas abre o checkout já com identificação e endereço preenchidos.
+    if (customerData) body.customerData = customerData;
 
     const createdAt = Date.now();
     const data = await request('POST', '/checkouts', body);
