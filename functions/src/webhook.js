@@ -204,8 +204,12 @@ async function processMedalEvent(db, tx, { eventRef, eventId, body, ev, checkout
   } else {
     // Estorno/chargeback fecha o checkout; 'rejected' só o pago e atual (como no programa).
     if ((ev.kind !== 'rejected' || current) && !checkoutClosed) tx.update(coRef, { status: ev.kind });
+    // Só o primeiro estorno do checkout conta: em shipped/delivered o status do pedido não muda,
+    // então um 2º evento (outro id) do mesmo checkout já fechado não conta nem alerta de novo.
     if (!current) {
       result = 'não é o checkout pago atual';
+    } else if (checkoutClosed) {
+      result = 'checkout já ' + checkout.status + ': estorno repetido';
     } else if (medal.status === 'paid') {
       tx.update(medalRef, { status: 'refunded', refundCount: FieldValue.increment(1), updatedAt: now });
       result = 'medalha reembolsada';
@@ -255,7 +259,8 @@ async function processEvent(db, body) {
     // e ANTES de qualquer leitura ou lógica de billing do programa.
     if (checkout && checkout.kind === 'medal') {
       if (!ours) return { result: 'ignorado', warn: 'checkout de medalha sem uid', ev };
-      return processMedalEvent(db, tx, { eventRef, eventId, body, ev, checkout, coRef, uid: ours });
+      const out = await processMedalEvent(db, tx, { eventRef, eventId, body, ev, checkout, coRef, uid: ours });
+      return { ...out, mismatch };
     }
 
     // Todas as leituras antes da primeira escrita (regra das transações).

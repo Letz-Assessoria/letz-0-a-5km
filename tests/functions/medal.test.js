@@ -356,6 +356,8 @@ describe('medalha: webhook', () => {
   it('(b) pagamento de outro checkout de quem já pagou: alerta medal-duplicate uma vez, status segue', async () => {
     const s = await withOrder();
     await hook(payment('pixReceived', s.checkoutId));
+    const billingBefore = await get(`users/${s.uid}/private/billing`);
+    const userBefore = await get('users/' + s.uid);
     const other = 'checkout-medalha-duplicado';
     await db.doc('checkouts/' + other).set({ kind: 'medal', uid: s.uid, value: 35, status: 'active', createdAt: new Date(), expiresAt: new Date() });
     assert.equal((await hook(payment('pixReceived', other, { paymentId: 'pay_dup_1' }))).status, 200);
@@ -365,7 +367,8 @@ describe('medalha: webhook', () => {
     assert.equal(m.checkoutId, s.checkoutId);
     assert.deepEqual(await alertTypes(), ['medal-duplicate']);
     assert.equal((await get('checkouts/' + other)).status, 'paid');
-    assert.equal((await get(`users/${s.uid}/private/billing`)).duplicate, undefined);
+    assert.deepEqual(await get(`users/${s.uid}/private/billing`), billingBefore);
+    assert.deepEqual(await get('users/' + s.uid), userBefore);
   });
 
   it('(c) reembolso total com paid: refunded, refundCount 1, sem alerta; chargeback repetido não conta de novo', async () => {
@@ -396,6 +399,8 @@ describe('medalha: webhook', () => {
       });
       const before = await get(`users/${s.uid}/private/medal`);
       assert.equal((await hook(payment('cardRefunded', s.checkoutId))).status, 200);
+      // Chargeback do mesmo checkout (outro id de evento) não conta de novo nem gera 2º alerta.
+      assert.equal((await hook(payment('cardChargeback', s.checkoutId))).status, 200);
       const m = await get(`users/${s.uid}/private/medal`);
       assert.equal(m.status, status);
       assert.equal(m.trackingCode, 'BR123456789BR');
@@ -405,6 +410,20 @@ describe('medalha: webhook', () => {
       assert.deepEqual(await alertTypes(), ['medal-refunded-shipped']);
     });
   }
+
+  it('(d) rejected de checkout da medalha que não é o atual: não conta e não altera nada', async () => {
+    const s = await withOrder();
+    await hook(payment('pixReceived', s.checkoutId));
+    const other = 'checkout-medalha-outro';
+    await db.doc('checkouts/' + other).set({ kind: 'medal', uid: s.uid, value: 35, status: 'active', createdAt: new Date(), expiresAt: new Date() });
+    const before = await get(`users/${s.uid}/private/medal`);
+    const e = payment('cardRefunded', other, { event: 'PAYMENT_REPROVED_BY_RISK_ANALYSIS', paymentId: 'pay_rj_outro' });
+    assert.equal((await hook(e)).status, 200);
+    assert.deepEqual(await get(`users/${s.uid}/private/medal`), before);
+    assert.equal((await get('checkouts/' + other)).status, 'active');
+    assert.equal((await get('checkouts/' + s.checkoutId)).status, 'paid');
+    assert.equal((await alertTypes()).length, 0);
+  });
 
   it('(e) reembolso parcial: só o alerta medal-partial-refund', async () => {
     const s = await withOrder();
@@ -443,18 +462,24 @@ describe('medalha: webhook', () => {
     assert.equal((await db.doc(`users/${uid}/private/medal`).get()).exists, false);
   });
 
-  it('(g) pedido de medalha defeituoso não impede o pagamento do programa de ativar', async () => {
+  it('(g) pedido e linha financeira da medalha defeituosos não impedem o programa de ativar', async () => {
     const p = person();
     const r = await call('signup', p);
     assert.equal(r.error, undefined, JSON.stringify(r.error));
     const uid = (await admin.auth().getUserByEmail(p.email)).uid;
     const checkoutId = (await get(`users/${uid}/private/billing`)).checkoutId;
+    // Pedido da medalha com lixo e linha financeira da medalha corrompida.
     await db.doc(`users/${uid}/private/medal`).set({ status: 42, refundCount: 'x', checkoutId: { a: 1 } });
+    const medalCo = 'checkout-medalha-defeituoso';
+    await db.doc('checkouts/' + medalCo).set({ kind: 'medal', uid, value: 'x', status: 'active', createdAt: new Date(), expiresAt: new Date() });
+    await db.doc('payments/' + medalCo).set({ parts: 'lixo', refunded: {}, status: 7, coupon: { a: 1 } });
+    // Evento da medalha chega antes e é tratado (200), mesmo com tudo defeituoso.
+    assert.equal((await hook(payment('pixReceived', medalCo, { paymentId: 'pay_g_medal' }))).status, 200);
     assert.equal((await hook(checkoutPaid(uid, checkoutId))).status, 200);
     assert.equal((await get('users/' + uid)).access, 'active');
     assert.equal((await get(`users/${uid}/private/billing`)).status, 'paid');
     assert.equal((await get('payments/' + checkoutId)).product, 'Do 0 aos 5 km');
-    assert.equal((await get(`users/${uid}/private/medal`)).status, 42);
+    assert.equal((await get('payments/' + checkoutId)).kind, undefined);
   });
 
   for (const billingStatus of ['pending', 'refunded', 'blocked']) {
