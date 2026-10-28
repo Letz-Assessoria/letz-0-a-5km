@@ -539,6 +539,12 @@ var UA=navigator.userAgent||'';
 var OS=/android/i.test(UA)?'android':'ios';
 var STANDALONE=false;try{STANDALONE=window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;}catch(e){}
 var deferred=null;
+/* guia de instalação: visto por aparelho (localStorage); sem localStorage, vale só até fechar a aba (sessionStorage) ou recarregar (memória) */
+var guideMem=false;
+function guideSeen(){if(guideMem)return true;try{if(localStorage.getItem('letz.installGuideSeen')==='1')return true;}catch(e){}try{if(sessionStorage.getItem('letz.installGuideSeen')==='1')return true;}catch(e){}return false;}
+function markGuideSeen(){guideMem=true;try{localStorage.setItem('letz.installGuideSeen','1');}catch(e){}try{sessionStorage.setItem('letz.installGuideSeen','1');}catch(e){}}
+/* aluno ativo que ainda não viu o guia neste aparelho (e não abriu o app instalado) */
+function guideDue(){return role==='athlete'&&!STANDALONE&&!guideSeen();}
 window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();deferred=e;if(V.view==='install')render();});
 function ic(n){return '<svg class="i" viewBox="0 0 24 24" aria-hidden="true">'+IC[n]+'</svg>';}
 
@@ -765,12 +771,13 @@ function vInstall(){
   st(3,'down','Toque em "Instalar app"','Em alguns celulares aparece "Adicionar à tela inicial".')+
   st(4,'check','Confirme em "Instalar"','')+
   st(5,'phone','Abra pelo ícone na tela inicial','A partir de agora, use sempre o ícone.');
- return backBtn('Voltar','login')+'<section class="hero"><img src="'+LOGO+'" alt="Letz" style="height:26px;width:auto;align-self:flex-start"><span class="label">Antes de entrar</span><h1 class="disp" style="font-size:clamp(46px,14vw,72px)">Leve o<br>treino no <em>bolso</em></h1><p style="color:var(--hero-muted)">Instale o Do 0 aos 5 km na tela inicial. Ele abre em tela cheia, como um aplicativo, sem passar por loja.</p></section>'+
+ var guided=guideDue(),back=role?home():'login';
+ return (guided?'':backBtn('Voltar',back))+'<section class="hero"><img src="'+LOGO+'" alt="Letz" style="height:26px;width:auto;align-self:flex-start"><span class="label">'+(guided?'Pagamento confirmado':role?'Instalar o app':'Antes de entrar')+'</span><h1 class="disp" style="font-size:clamp(46px,14vw,72px)">Leve o<br>treino no <em>bolso</em></h1><p style="color:var(--hero-muted)">Instale o Do 0 aos 5 km na tela inicial. Ele abre em tela cheia, como um aplicativo, sem passar por loja.</p></section>'+
  '<div class="seg" role="group" aria-label="Seu celular"><button data-act="os" data-t="ios" aria-pressed="'+(V.os==='ios')+'">iPhone</button><button data-act="os" data-t="android" aria-pressed="'+(V.os==='android')+'">Android</button></div>'+
  (V.os==='android'&&deferred?'<button class="btn go wide" data-act="install">'+ic('down')+'Instalar agora</button><p class="muted" style="text-align:center;font-size:14px">Ou siga o passo a passo:</p>':'')+
  '<div class="card"><ol class="how">'+(V.os==='ios'?ios:and)+'</ol></div>'+
  (V.os==='ios'?'<p class="note">'+ic('info')+'<span>No iPhone, o app da tela inicial pede para você entrar de novo com seu e-mail e senha. É só uma vez.</span></p>':'')+
- '<button class="btn go wide" data-act="to-login">Já instalei, entrar '+ic('arrow')+'</button>';}
+ (role?'<button class="btn go wide" data-act="guide-next">'+(guided?'Já instalei, continuar ':'Voltar ao app ')+ic('arrow')+'</button>'+(guided?'<button class="btn line wide" data-act="guide-next">Fazer depois</button>':''):'<button class="btn go wide" data-act="to-login">Já instalei, entrar '+ic('arrow')+'</button>');}
 
 function vProfile(){var D=V.draft,first=!S.profiled;
  return header(first?'Seu perfil':'Editar perfil')+
@@ -780,7 +787,7 @@ function vProfile(){var D=V.draft,first=!S.profiled;
  '<div class="field"><label for="in-handle">Seu @</label><div class="at"><span>@</span><input id="in-handle" type="text" maxlength="30" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="seu.instagram" value="'+esc(D.handle)+'"></div><small>Letras, números, ponto e sublinhado. É o que aparece no feed.</small></div>'+
  (V.perr?'<p class="err" role="alert">'+esc(V.perr)+'</p>':'')+
  '<div class="stack" style="gap:8px"><span class="label">Assim você aparece no feed</span><div class="preview"><div class="post">'+(D.photo?'<div class="av me"><img src="'+esc(D.photo)+'" alt=""></div>':'<div class="av me" aria-hidden="true" id="pv-ini">'+esc(initials(D.name||D.handle||'?'))+'</div>')+'<div><div><span class="who" id="pv-handle">@'+esc(D.handle||'seu.instagram')+'</span> <span class="muted">· agora</span></div><div class="what">'+ic('run')+'<span>Fez o treino de terça da semana 1</span></div></div></div></div></div>'+
- '<button class="btn go wide" data-act="profile-save"'+(V.pbusy?' disabled':'')+'>'+(V.pbusy?'Salvando…':(first?'Salvar e continuar':'Salvar'))+' '+ic('arrow')+'</button>'+'<button class="linkbtn" data-act="to-privacy">Como usamos seus dados</button>'+
+ '<button class="btn go wide" data-act="profile-save"'+(V.pbusy?' disabled':'')+'>'+(V.pbusy?'Salvando…':(first?'Salvar e continuar':'Salvar'))+' '+ic('arrow')+'</button>'+'<button class="linkbtn" data-act="to-privacy">Como usamos seus dados</button>'+(STANDALONE?'':'<button class="linkbtn" data-act="to-install">Como instalar o app no celular</button>')+
  (first?'':'<button class="btn line wide" data-act="profile-cancel">Cancelar</button>');}
 function openProfile(){V.draft={name:S.profiled?S.name:'',handle:S.handle,photo:S.photo};V.perr='';V.pbusy=false;V.view='profile';}
 function grab(){var n=document.getElementById('in-pname'),h=document.getElementById('in-handle');if(n)V.draft.name=n.value;if(h)V.draft.handle=h.value;}
@@ -1160,7 +1167,7 @@ var TAB_TITLES={treinos:'Treinos',feed:'Feed',ranking:'Ranking',videos:'Vídeos'
 /* papel da sessão: null (sem login), 'admin', 'athlete', 'pending' ou 'blocked'; sessionKnown fica true na primeira resposta do LetzFB */
 var role=null,prevRole=null,sessionKnown=false;
 function roleOf(s){if(!s)return null;if(s.claims&&s.claims.admin===true)return 'admin';var a=s.doc&&s.doc.access;return a==='active'?'athlete':a==='blocked'?'blocked':'pending';}
-function home(){return role==='admin'?'admin':role==='athlete'?(!S.profiled?'profile':S.welcomed?'athlete':'welcome'):role==='pending'?'aguardando':role==='blocked'?'bloqueado':'login';}
+function home(){return role==='admin'?'admin':role==='athlete'?(guideDue()?'install':!S.profiled?'profile':S.welcomed?'athlete':'welcome'):role==='pending'?'aguardando':role==='blocked'?'bloqueado':'login';}
 var NEEDS_SESSION=['admin','athlete','profile','welcome','aguardando','confirmando','bloqueado','medalha'];
 var pushes=0,lastPath=null,fromPop=false;
 function pathOf(){return V.view==='athlete'?'/app/'+V.tab:V.view==='admin'?'/admin/'+V.atab:V.view==='loading'?V.wait:(ROUTES[V.view]||'/');}
@@ -1173,6 +1180,7 @@ function applyPath(hash){var seg=String(hash||'').replace(/^#\/?/,'').split('/')
  /* a guarda espera a primeira sessão: até lá, as telas com login mostram "Carregando…" e o endereço fica */
  if(NEEDS_SESSION.indexOf(view)>-1&&!sessionKnown){V.wait=view==='athlete'?'/app/'+V.tab:view==='admin'?'/admin/'+V.atab:ROUTES[view];view='loading';}
  else if(view==='admin'){if(role!=='admin')view=home();}
+ else if((view==='athlete'||view==='profile'||view==='welcome')&&guideDue())view='install';
  else if(view==='athlete'||view==='profile'||view==='welcome'){if(role!=='athlete'&&role!=='admin')view=home();else if(role==='admin'&&(view==='profile'||view==='welcome'))view=home();else if(view!=='profile'&&role!=='admin'&&!S.profiled)view='profile';}
  else if(view==='medalha'){if(role!=='athlete')view=home();}
  else if(view==='aguardando'){if(role!=='pending')view=home();}
@@ -1184,7 +1192,7 @@ function applyPath(hash){var seg=String(hash||'').replace(/^#\/?/,'').split('/')
  V.view=view;V.sheet=null;V.mo=null;}
 /* sessão mudou (ou o cadastro terminou): reaplica a guarda na rota atual, sem criar entrada no histórico */
 function reroute(msg){var before=V.view;V.busy=false;applyPath(location.hash);if(msg)V.aerr=msg;
- if(V.view===before&&before!=='loading'&&!msg)return; /* mesma tela (landing, privacidade...): não redesenha nem rola */
+ if(V.view===before&&before!=='loading'&&before!=='install'&&!msg)return; /* mesma tela (landing, privacidade...): não redesenha nem rola */
  fromPop=true;render();fromPop=false;window.scrollTo(0,0);}
 function routeSync(){var path=pathOf(),h='#'+path;
  document.title=(V.view==='athlete'?TAB_TITLES[V.tab]:TITLES[V.view])+(V.view==='sales'?' · Letz':' · Do 0 aos 5 km');
@@ -1303,6 +1311,7 @@ app.addEventListener('click',function(e){var b=e.target.closest('[data-act]');if
  else if(a==='os'){V.os=b.getAttribute('data-t');}
  else if(a==='to-login'){V.view='login';}
  else if(a==='to-install'){V.view='install';}
+ else if(a==='guide-next'){markGuideSeen();var gh=home();applyPath(gh==='athlete'?'#/app/'+V.tab:gh==='admin'?'#/admin/'+V.atab:'#'+ROUTES[gh]);}
  else if(a==='install'){if(deferred){deferred.prompt();deferred.userChoice.then(function(){deferred=null;render();});}return;}
  else if(a==='welcome-ok'){S.welcomed=true;if(window.LetzFB)LetzFB.markWelcomed().catch(function(){});V.view='athlete';V.tab='treinos';}
  else if(a==='to-profile'){openProfile();}
