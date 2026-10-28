@@ -1,0 +1,385 @@
+{
+  "_nota": "Corpos reais de webhook do sandbox do Asaas (27/10/2026), com account.id e creditCardToken omitidos. cardChargeback NAO foi capturado (sandbox nao simula chargeback): e o cardConfirmed com event/status/chargeback trocados conforme o exemplo de docs.asaas.com/docs/webhook-para-cobrancas.",
+  "cardConfirmed": {
+    "id": "evt_15e444ff9b9ab9ec29294aa1abe68025&23472348",
+    "event": "PAYMENT_CONFIRMED",
+    "dateCreated": "2026-10-27 10:00:32",
+    "account": {
+      "id": "<conta-sandbox>",
+      "ownerId": null
+    },
+    "payment": {
+      "object": "payment",
+      "id": "pay_5abeog1boszmcyki",
+      "dateCreated": "2026-10-27",
+      "customer": "cus_000009700317",
+      "installment": "1e7dbfdd-d86d-46dc-82a8-ba347835a5c6",
+      "checkoutSession": "121ab2db-988e-4418-9d5d-45a58638ba01",
+      "paymentLink": null,
+      "value": 13.25,
+      "netValue": 12.69,
+      "originalValue": null,
+      "interestValue": null,
+      "description": "Parcela 1 de 12.",
+      "billingType": "CREDIT_CARD",
+      "confirmedDate": "2026-10-27",
+      "creditCard": {
+        "creditCardNumber": "4444",
+        "creditCardBrand": "VISA",
+        "creditCardToken": "<omitido>"
+      },
+      "pixTransaction": null,
+      "status": "CONFIRMED",
+      "dueDate": "2026-10-27",
+      "originalDueDate": "2026-10-27",
+      "paymentDate": null,
+      "clientPaymentDate": "2026-10-27",
+      "installmentNumber": 1,
+      "invoiceUrl": "https://sandbox.asaas.com/i/5abeog1boszmcyki",
+      "invoiceNumber": "19566003",
+      "externalReference": null,
+      "deleted": false,
+      "anticipated": false,
+      "anticipable": true,
+      "creditDate": "2026-11-30",
+      "estimatedCreditDate": "2026-11-30",
+      "transactionReceiptUrl": "https://sandbox.asaas.com/000/comprovantes/7234114067600573",
+      "nossoNumero": null,
+      "bankSlipUrl": null,
+      "lastInvoiceViewedDate": null,
+      "lastBankSlipViewedDate": null,
+      "discount": {
+        "value": 0,
+        "limitDate": null,
+        "dueDateLimitDays": 0,
+        "type": "FIXED"
+      },
+      "fine": {
+        "value": 0,
+        "type": "FIXED"
+      },
+      "interest": {
+        "value": 0,
+        "type": "PERCENTAGE"
+      },
+      "postalService": false,
+      "escrow": null,
+      "refunds": null
+    }
+  },
+  "pixReceived": {
+    "id": "evt_d26e303b238e509335ac9ba210e51b0f&23472678",
+    "event": "PAYMENT_RECEIVED",
+    "dateCreated": "2026-10-27 10:01:40",
+    "account": {
+      "id": "<conta-sandbox>",
+      "ownerId": null
+    },
+    "payment": {
+      "object": "payment",
+      "id": "pay_55jz1por0iil4o4h",
+      "dateCreated": "2026-10-27",
+      "customer": "cus_000009700335",
+      "checkoutSession": "97d20bc1-7ede-4f70-9e5c-8e80f6dad160",
+      "paymentLink": null,
+      "value": 159,
+      "netValue": 157.01,
+      "originalValue": null,
+      "interestValue": null,
+      "description": null,
+      "billingType": "PIX",
+      "confirmedDate": "2026-10-27",
+      "pixTransaction": "b4974465-9c7c-4f95-838f-22c7f38b3e2a",
+      "pixQrCodeId": "951245cd-6f21-48b0-8a42-5ae3d1566c36",
+      "status": "RECEIVED",
+      "dueDate": "2026-10-27",
+      "originalDueDate": "2026-10-27",
+      "paymentDate": "2026-10-27",
+      "clientPaymentDate": "2026-10-27",
+      "installmentNumber": null,
+      "invoiceUrl": "https://sandbox.asaas.com/i/55jz1por0iil4o4h",
+      "invoiceNumber": "19566132",
+      "externalReference": null,
+      "deleted": false,
+      "anticipated": false,
+      "anticipable": false,
+      "creditDate": "2026-10-27",
+      "estimatedCreditDate": "2026-10-27",
+      "transactionReceiptUrl": "https://sandbox.asaas.com/000/comprovantes/h/UEFZTUVOVF9SRUNFSVZFRDpwYXlfNTVqejFwb3IwaWlsNG80aA%3D%3D",
+      "nossoNumero": null,
+      "bankSlipUrl": null,
+      "lastInvoiceViewedDate": null,
+      "lastBankSlipViewedDate": null,
+      "discount": {
+        "value": 0,
+        "limitDate": null,
+        "dueDateLimitDays": 0,
+        "type": "FIXED"
+      },
+      "fine": {
+        "value": 0,
+        "type": "FIXED"
+      },
+      "interest": {
+        "value": 0,
+        "type": "PERCENTAGE"
+      },
+      "postalService": false,
+      "escrow": null,
+      "refunds": null
+    }
+  },
+  "pixCreated": {
+    "id": "evt_05b708f961d739ea7eba7e4db318f621&23472561",
+    "event": "PAYMENT_CREATED",
+    "dateCreated": "2026-10-27 10:01:28",
+    "account": {
+      "id": "<conta-sandbox>",
+      "ownerId": null
+    },
+    "payment": {
+      "object": "payment",
+      "id": "pay_55jz1por0iil4o4h",
+      "dateCreated": "2026-10-27",
+      "customer": "cus_000009700335",
+      "checkoutSession": "97d20bc1-7ede-4f70-9e5c-8e80f6dad160",
+      "paymentLink": null,
+      "value": 159,
+      "netValue": 157.01,
+      "originalValue": null,
+      "interestValue": null,
+      "description": null,
+      "billingType": "PIX",
+      "pixTransaction": null,
+      "status": "PENDING",
+      "dueDate": "2026-10-27",
+      "originalDueDate": "2026-10-27",
+      "paymentDate": null,
+      "clientPaymentDate": null,
+      "installmentNumber": null,
+      "invoiceUrl": "https://sandbox.asaas.com/i/55jz1por0iil4o4h",
+      "invoiceNumber": "19566132",
+      "externalReference": null,
+      "deleted": false,
+      "anticipated": false,
+      "anticipable": false,
+      "creditDate": null,
+      "estimatedCreditDate": null,
+      "transactionReceiptUrl": null,
+      "nossoNumero": null,
+      "bankSlipUrl": null,
+      "lastInvoiceViewedDate": null,
+      "lastBankSlipViewedDate": null,
+      "discount": {
+        "value": 0,
+        "limitDate": null,
+        "dueDateLimitDays": 0,
+        "type": "FIXED"
+      },
+      "fine": {
+        "value": 0,
+        "type": "FIXED"
+      },
+      "interest": {
+        "value": 0,
+        "type": "PERCENTAGE"
+      },
+      "postalService": false,
+      "escrow": null,
+      "refunds": null
+    }
+  },
+  "cardRefunded": {
+    "id": "evt_d313266b1bd58128da69a2a96d82e79e&23472839",
+    "event": "PAYMENT_REFUNDED",
+    "dateCreated": "2026-10-27 10:01:57",
+    "account": {
+      "id": "<conta-sandbox>",
+      "ownerId": null
+    },
+    "payment": {
+      "object": "payment",
+      "id": "pay_5abeog1boszmcyki",
+      "dateCreated": "2026-10-27",
+      "customer": "cus_000009700317",
+      "installment": "1e7dbfdd-d86d-46dc-82a8-ba347835a5c6",
+      "checkoutSession": "121ab2db-988e-4418-9d5d-45a58638ba01",
+      "paymentLink": null,
+      "value": 13.25,
+      "netValue": 12.69,
+      "originalValue": null,
+      "interestValue": null,
+      "description": "Parcela 1 de 12.",
+      "billingType": "CREDIT_CARD",
+      "confirmedDate": "2026-10-27",
+      "creditCard": {
+        "creditCardNumber": "4444",
+        "creditCardBrand": "VISA",
+        "creditCardToken": "<omitido>"
+      },
+      "pixTransaction": null,
+      "status": "REFUNDED",
+      "dueDate": "2026-10-27",
+      "originalDueDate": "2026-10-27",
+      "paymentDate": null,
+      "clientPaymentDate": "2026-10-27",
+      "installmentNumber": 1,
+      "invoiceUrl": "https://sandbox.asaas.com/i/5abeog1boszmcyki",
+      "invoiceNumber": "19566003",
+      "externalReference": null,
+      "deleted": false,
+      "anticipated": false,
+      "anticipable": false,
+      "creditDate": "2026-11-30",
+      "estimatedCreditDate": "2026-11-30",
+      "transactionReceiptUrl": "https://sandbox.asaas.com/000/comprovantes/6594222694555618",
+      "nossoNumero": null,
+      "bankSlipUrl": null,
+      "lastInvoiceViewedDate": null,
+      "lastBankSlipViewedDate": null,
+      "discount": {
+        "value": 0,
+        "limitDate": null,
+        "dueDateLimitDays": 0,
+        "type": "FIXED"
+      },
+      "fine": {
+        "value": 0,
+        "type": "FIXED"
+      },
+      "interest": {
+        "value": 0,
+        "type": "PERCENTAGE"
+      },
+      "postalService": false,
+      "escrow": null,
+      "refunds": [
+        {
+          "dateCreated": "2026-10-27 10:01:52",
+          "status": "DONE",
+          "value": 13.25,
+          "endToEndIdentifier": null,
+          "transactionReceiptUrl": "https://sandbox.asaas.com/000/comprovantes/6594222694555618",
+          "description": null,
+          "refundedSplits": null
+        }
+      ]
+    }
+  },
+  "checkoutPaidPix": {
+    "id": "evt_20f793f686aa4783d486a40e3c6b91d1&23472664",
+    "event": "CHECKOUT_PAID",
+    "dateCreated": "2026-10-27 10:01:39",
+    "account": {
+      "id": "<conta-sandbox>",
+      "ownerId": null
+    },
+    "checkout": {
+      "id": "97d20bc1-7ede-4f70-9e5c-8e80f6dad160",
+      "link": "https://sandbox.asaas.com/000/checkoutSession/show/97d20bc1-7ede-4f70-9e5c-8e80f6dad160",
+      "status": "PAID",
+      "minutesToExpire": 60,
+      "externalReference": "uid-teste-pix-002",
+      "billingTypes": [
+        "PIX",
+        "CREDIT_CARD"
+      ],
+      "chargeTypes": [
+        "DETACHED",
+        "INSTALLMENT"
+      ],
+      "callback": {
+        "cancelUrl": "https://letz-0-aos-5km-dev.web.app/#/pagamento?c=cancel",
+        "successUrl": "https://letz-0-aos-5km-dev.web.app/#/pagamento",
+        "expiredUrl": "https://letz-0-aos-5km-dev.web.app/#/pagamento?c=expired"
+      },
+      "items": [
+        {
+          "name": "Do 0 aos 5 km",
+          "description": "Programa de corrida (TESTE)",
+          "externalReference": null,
+          "quantity": 1,
+          "value": 159
+        }
+      ],
+      "subscription": null,
+      "installment": {
+        "maxInstallmentCount": 12
+      },
+      "split": null,
+      "customer": null,
+      "customerData": null
+    }
+  },
+  "cardChargeback": {
+    "id": "evt_exemplo_chargeback",
+    "event": "PAYMENT_CHARGEBACK_REQUESTED",
+    "dateCreated": "2026-10-27 12:00:00",
+    "account": {
+      "id": "<conta-sandbox>",
+      "ownerId": null
+    },
+    "payment": {
+      "object": "payment",
+      "id": "pay_5abeog1boszmcyki",
+      "dateCreated": "2026-10-27",
+      "customer": "cus_000009700317",
+      "installment": "1e7dbfdd-d86d-46dc-82a8-ba347835a5c6",
+      "checkoutSession": "121ab2db-988e-4418-9d5d-45a58638ba01",
+      "paymentLink": null,
+      "value": 13.25,
+      "netValue": 12.69,
+      "originalValue": null,
+      "interestValue": null,
+      "description": "Parcela 1 de 12.",
+      "billingType": "CREDIT_CARD",
+      "confirmedDate": "2026-10-27",
+      "creditCard": {
+        "creditCardNumber": "4444",
+        "creditCardBrand": "VISA",
+        "creditCardToken": "<omitido>"
+      },
+      "pixTransaction": null,
+      "status": "CHARGEBACK_REQUESTED",
+      "dueDate": "2026-10-27",
+      "originalDueDate": "2026-10-27",
+      "paymentDate": null,
+      "clientPaymentDate": "2026-10-27",
+      "installmentNumber": 1,
+      "invoiceUrl": "https://sandbox.asaas.com/i/5abeog1boszmcyki",
+      "invoiceNumber": "19566003",
+      "externalReference": null,
+      "deleted": false,
+      "anticipated": false,
+      "anticipable": true,
+      "creditDate": "2026-11-30",
+      "estimatedCreditDate": "2026-11-30",
+      "transactionReceiptUrl": "https://sandbox.asaas.com/000/comprovantes/7234114067600573",
+      "nossoNumero": null,
+      "bankSlipUrl": null,
+      "lastInvoiceViewedDate": null,
+      "lastBankSlipViewedDate": null,
+      "discount": {
+        "value": 0,
+        "limitDate": null,
+        "dueDateLimitDays": 0,
+        "type": "FIXED"
+      },
+      "fine": {
+        "value": 0,
+        "type": "FIXED"
+      },
+      "interest": {
+        "value": 0,
+        "type": "PERCENTAGE"
+      },
+      "postalService": false,
+      "escrow": null,
+      "refunds": null,
+      "chargeback": {
+        "status": "REQUESTED",
+        "reason": "PROCESS_ERROR"
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "letz-0-aos-5km",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:unit": "node --test \"tests/unit/*.test.js\"",
+    "test:rules": "firebase emulators:exec --only firestore,storage --project demo-letz \"node --test --test-concurrency=1 \\\"tests/rules/*.test.js\\\"\"",
+    "test:functions": "node scripts/make-test-rules.mjs && mkdir -p functions/shared && cp public/lib/core.js functions/shared/core.js && node scripts/fake-secrets.mjs && firebase emulators:exec --config firebase.test.json --only auth,firestore,functions --project demo-letz \"node --test --test-concurrency=1 \\\"tests/functions/*.test.js\\\"\"",
+    "test:e2e": "node scripts/make-test-rules.mjs && mkdir -p functions/shared && cp public/lib/core.js functions/shared/core.js && node scripts/fake-secrets.mjs && playwright test",
+    "emulators": "firebase emulators:start",
+    "test:admin": "firebase emulators:exec --only auth --project demo-letz \"node --test --test-concurrency=1 \\\"tests/admin/*.test.js\\\"\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
+    "@playwright/test": "^1.64.1",
+    "firebase": "^12.19.0",
+    "firebase-admin": "^13.10.0"
+  }
+}

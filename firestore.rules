@@ -1,0 +1,192 @@
+rules_version = '2';
+
+// Regras do Firestore do "Do 0 aos 5 km".
+// Functions usam o Admin SDK e não passam por estas regras.
+// Treinador = custom claim admin == true (não tem users/{uid}).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isAdmin() { return signedIn() && request.auth.token.get('admin', false) == true; }
+    function me() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function isActive() {
+      return signedIn() && exists(me()) && get(me()).data.access == 'active';
+    }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function myProfile() { return get(me()).data; }
+    // URL de imagem: vazia ou do Firebase Storage. Em produção só o host real.
+    // Os testes locais usam uma cópia gerada por scripts/make-test-rules.mjs que
+    // acrescenta o host do emulador; esta regra NÃO o aceita.
+    function imgUrlOk(v) {
+      return v is string && v.size() <= 2048 && (v == ''
+        || v.matches('^https://firebasestorage[.]googleapis[.]com/v0/b/.*'));
+    }
+    // Se o handle foi criado ou trocado, a reserva handles/{novo} do próprio uid
+    // tem que existir ao fim da mesma transação/batch.
+    function handleReserved() {
+      return !('handle' in changed())
+        || getAfter(/databases/$(database)/documents/handles/$(request.resource.data.handle)).data.uid
+           == request.auth.uid;
+    }
+
+    // ---------- users ----------
+    match /users/{uid} {
+      function profileFieldsOk(d) {
+        // Só valida o que mudou (curto-circuito: campo ausente e intocado não dá erro).
+        let c = changed();
+        return (!('name' in c) || (d.name is string && d.name.size() <= 80))
+          && (!('handle' in c) || (d.handle is string && d.handle.matches('^[a-z0-9._]{3,30}$')))
+          && (!('photoURL' in c) || imgUrlOk(d.photoURL))
+          && (!('profiled' in c) || d.profiled is bool)
+          && (!('welcomed' in c) || d.welcomed is bool);
+      }
+      allow read: if isOwner(uid) || isActive() || isAdmin();
+      // users/{uid} é criado pelas Functions.
+      allow create, delete: if false;
+      allow update: if
+        (isOwner(uid)
+          && changed().hasOnly(['name', 'handle', 'photoURL', 'profiled', 'welcomed'])
+          && profileFieldsOk(request.resource.data)
+          && handleReserved())
+        || (isAdmin()
+          && changed().hasOnly(['access', 'points', 'done'])
+          && request.resource.data.access in ['pending', 'active', 'blocked']);
+
+      // private/profile e private/billing: só Functions escrevem.
+      match /private/{docId} {
+        allow read: if isOwner(uid) || isAdmin();
+        allow write: if false;
+      }
+
+      // private/ship: aluno grava o endereço; treinador, paidAt/track.
+      match /private/ship {
+        function addrKeys() {
+          return ['nome', 'cep', 'rua', 'num', 'comp', 'bairro', 'cidade', 'uf', 'tel', 'at'];
+        }
+        function atOk() {
+          return !('at' in request.resource.data) || request.resource.data.at == request.time
+            || (resource != null && 'at' in resource.data && request.resource.data.at == resource.data.at);
+        }
+        allow read: if isOwner(uid) || isAdmin();
+        allow create: if isOwner(uid)
+          && request.resource.data.keys().hasOnly(addrKeys()) && atOk();
+        allow update: if
+          (isOwner(uid) && changed().hasOnly(addrKeys()) && atOk())
+          || (isAdmin() && changed().hasOnly(['paidAt', 'track']));
+        allow delete: if false;
+      }
+    }
+
+    // ---------- handles (reserva de @) ----------
+    match /handles/{handle} {
+      allow read: if signedIn();
+      // create só acontece se o doc não existe; com doc existente vira update (negado).
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid'])
+        && request.resource.data.uid == request.auth.uid;
+      allow update: if false;
+      // Só o dono apaga, e só se o handle não estiver mais em users/{uid}.handle
+      // ao fim da batch (senão outro aluno poderia pegar o mesmo @).
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid
+        && getAfter(me()).data.get('handle', null) != handle;
+    }
+
+    // ---------- só Functions ----------
+    match /cpfs/{cpf} { allow read, write: if false; }
+    match /asaasEvents/{eventId} { allow read, write: if false; }
+
+    // ---------- payments (financeiro: uma linha por compra; só as Functions escrevem) ----------
+    match /payments/{checkoutId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ---------- alerts (pagamento sem ativação; escritos pelo webhook) ----------
+    match /alerts/{id} {
+      allow read: if isAdmin();
+      allow update: if isAdmin() && changed().hasOnly(['resolved'])
+        && request.resource.data.resolved is bool;
+      allow create, delete: if false;
+    }
+
+    // ---------- config ----------
+    match /config/{docId} {
+      allow read: if isActive() || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ---------- posts ----------
+    function weekOpen(w) {
+      return request.time >= get(/databases/$(database)/documents/config/app).data.start
+        + duration.value((w - 1) * 7, 'd');
+    }
+
+    match /posts/{postId} {
+      // comment, photoPath e imgURL: tipos e formatos. uid/w/d vêm do próprio post.
+      function contentOk(p, uid, w, d) {
+        return (!('comment' in p) || (p.comment is string && p.comment.size() <= 1000))
+          && (!('photoPath' in p) || p.photoPath == ''
+              || p.photoPath == 'workouts/' + uid + '/' + string(w) + '-' + string(d) + '.jpg')
+          && (!('imgURL' in p) || imgUrlOk(p.imgURL));
+      }
+      function newPostOk() {
+        let p = request.resource.data;
+        let u = myProfile();
+        return p.keys().hasAll(['uid', 'handle', 'name', 'photoURL', 'w', 'd', 'at', 'hidden', 'authorActive'])
+          && p.keys().hasOnly(['uid', 'handle', 'name', 'photoURL', 'w', 'd', 'at',
+                               'comment', 'photoPath', 'imgURL', 'hidden', 'authorActive', 'rc'])
+          && p.uid == request.auth.uid
+          && p.handle == u.handle && p.name == u.name && p.photoURL == u.photoURL
+          && p.w is int && p.w >= 1 && p.w <= 10
+          && p.d is int && p.d >= 0 && p.d <= 2
+          && postId == request.auth.uid + '_' + string(p.w) + '-' + string(p.d)
+          && p.at == request.time
+          && p.hidden == false
+          && p.authorActive == true
+          && (!('rc' in p) || p.rc == {})
+          && contentOk(p, p.uid, p.w, p.d)
+          && weekOpen(p.w);
+      }
+
+      allow read: if isActive() || isAdmin();
+      allow create: if isActive() && newPostOk();
+      allow update: if
+        (isActive() && resource.data.uid == request.auth.uid
+          && changed().hasOnly(['comment', 'photoPath', 'imgURL'])
+          && contentOk(request.resource.data, resource.data.uid, resource.data.w, resource.data.d))
+        || (isAdmin() && changed().hasOnly(['hidden']) && request.resource.data.hidden is bool);
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+
+      match /comments/{commentId} {
+        allow read: if isActive() || isAdmin();
+        allow create: if isActive()
+          && request.resource.data.keys().hasOnly(['uid', 'handle', 'text', 'at', 'hidden'])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.handle == myProfile().handle
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 1000
+          && request.resource.data.at == request.time
+          && request.resource.data.hidden == false
+          && exists(/databases/$(database)/documents/posts/$(postId));
+        allow update: if isAdmin() && changed().hasOnly(['hidden'])
+          && request.resource.data.hidden is bool;
+        allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+      }
+
+      match /reactions/{uid} {
+        function boolOrAbsent(d, k) { return !(k in d) || d[k] is bool; }
+        allow read: if isActive() || isAdmin();
+        allow create, update: if isActive() && isOwner(uid)
+          && request.resource.data.keys().hasOnly(['oi', 'clap', 'fire', 'power', 'love'])
+          && boolOrAbsent(request.resource.data, 'oi')
+          && boolOrAbsent(request.resource.data, 'clap')
+          && boolOrAbsent(request.resource.data, 'fire')
+          && boolOrAbsent(request.resource.data, 'power')
+          && boolOrAbsent(request.resource.data, 'love');
+        allow delete: if isOwner(uid);
+      }
+    }
+  }
+}

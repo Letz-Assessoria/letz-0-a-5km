@@ -1,3 +1,12 @@
 .firebase/
 .playwright-mcp/
 .DS_Store
+node_modules/
+functions/shared/
+*.log
+test-results/
+.superpowers/
+functions/.secret.local
+playwright-report/
+.test-rules/
+firebase.test.json
