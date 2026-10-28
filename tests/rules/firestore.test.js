@@ -203,6 +203,46 @@ describe('firestore.rules', () => {
     await assertFails(setDoc(doc(db(ALICE), 'payments', 'c3'), { uid: ALICE, status: 'paid' }));
   });
 
+  it('coupons: só admin lê; admin edita só active/maxUses/expiresAt; ninguém cria nem apaga', async () => {
+    await seed(async (f) => {
+      await setDoc(doc(f, 'coupons', 'MARIA20'), {
+        code: 'MARIA20', partnerUid: 'p1', partnerName: 'Maria', active: true, maxUses: 20, usedCount: 3,
+        expiresAt: null, createdAt: Timestamp.now(),
+      });
+      await setDoc(doc(f, 'coupons/MARIA20/uses/u1'), { name: 'Ana', at: Timestamp.now() });
+      await setDoc(doc(f, 'users', ALICE), userDoc('alice', 'active'));
+    });
+    const ref = (d) => doc(d, 'coupons', 'MARIA20');
+    await assertFails(getDoc(ref(db(ALICE))));
+    await assertFails(getDoc(ref(anonDb())));
+    await assertSucceeds(getDoc(ref(adminDb())));
+    await assertFails(updateDoc(ref(db(ALICE)), { active: false }));
+    await assertFails(updateDoc(ref(anonDb()), { active: false }));
+    await assertSucceeds(updateDoc(ref(adminDb()), { active: false }));
+    await assertSucceeds(updateDoc(ref(adminDb()), { maxUses: 30 }));
+    await assertSucceeds(updateDoc(ref(adminDb()), { expiresAt: Timestamp.fromMillis(Date.now() + DAY) }));
+    await assertSucceeds(updateDoc(ref(adminDb()), { expiresAt: null }));
+    await assertFails(updateDoc(ref(adminDb()), { usedCount: 0 }));
+    await assertFails(updateDoc(ref(adminDb()), { code: 'OUTRO' }));
+    await assertFails(updateDoc(ref(adminDb()), { partnerUid: 'x' }));
+    await assertFails(updateDoc(ref(adminDb()), { maxUses: 0 }));
+    await assertFails(updateDoc(ref(adminDb()), { maxUses: 501 }));
+    await assertFails(updateDoc(ref(adminDb()), { maxUses: 2 })); // abaixo de usedCount (3)
+    await assertFails(updateDoc(ref(adminDb()), { maxUses: 10.5 }));
+    await assertFails(updateDoc(ref(adminDb()), { active: 'sim' }));
+    await assertFails(setDoc(doc(adminDb(), 'coupons', 'NOVO0001'), { code: 'NOVO0001', active: true, maxUses: 1, usedCount: 0 }));
+    await assertFails(deleteDoc(ref(adminDb())));
+    const use = (d) => doc(d, 'coupons/MARIA20/uses/u1');
+    await assertFails(getDoc(use(db(ALICE))));
+    await assertFails(getDoc(use(anonDb())));
+    await assertSucceeds(getDoc(use(adminDb())));
+    await assertSucceeds(getDocs(collection(adminDb(), 'coupons/MARIA20/uses')));
+    await assertFails(setDoc(doc(adminDb(), 'coupons/MARIA20/uses/u2'), { name: 'X', at: Timestamp.now() }));
+    await assertFails(updateDoc(use(adminDb()), { name: 'Y' }));
+    await assertFails(deleteDoc(use(adminDb())));
+    await assertFails(setDoc(doc(db(ALICE), 'coupons/MARIA20/uses/alice'), { name: 'alice', at: Timestamp.now() }));
+  });
+
   it('alerts: aluno não lê nem escreve; admin lê e só marca resolved', async () => {
     await seed((f) => setDoc(doc(f, 'alerts', 'a1'), { type: 'unknown-uid', uid: null, checkoutId: null, eventId: 'e', resolved: false }));
     await assertFails(getDoc(doc(db(ALICE), 'alerts', 'a1')));
