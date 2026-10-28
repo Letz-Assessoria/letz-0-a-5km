@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const logger = require('firebase-functions/logger');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { classifyEvent } = require('./asaas.js');
-const { ASAAS_WEBHOOK_TOKEN, PROGRAM_PRICE } = require('./billing-config.js');
+const { ASAAS_WEBHOOK_TOKEN, PROGRAM_PRICE, MEDAL_PRICE } = require('./billing-config.js');
 const { safeErr } = require('./safe.js');
 
 const CLOSED = new Set(['refunded', 'chargeback', 'rejected']);
@@ -82,7 +82,8 @@ function applyClosed(tx, refs, ev, { billing, checkout }) {
   const closeCheckout = ev.kind !== 'rejected' || current;
   if (closeCheckout && refs.checkout && checkout && !CLOSED.has(checkout.status)) tx.update(refs.checkout, { status: ev.kind });
   if (!current) return 'não é o checkout pago atual';
-  tx.update(refs.billing, { status: ev.kind, updatedAt: FieldValue.serverTimestamp() });
+  // refundCount: quantas vezes este aluno teve o programa estornado (limita a recompra).
+  tx.update(refs.billing, { status: ev.kind, refundCount: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() });
   tx.update(refs.user, { access: 'blocked' });
   const c = refs.coupon;
   if (c && c.use && c.use.exists && c.use.get('status') === 'converted') {
@@ -94,13 +95,17 @@ function applyClosed(tx, refs, ev, { billing, checkout }) {
 
 const round2 = (n) => Math.round(n * 100) / 100;
 const PRODUCT = 'Do 0 aos 5 km';
+const MEDAL_PRODUCT = 'Medalha Letz bora!';
+// Estados do pedido da medalha em que o pagamento já foi aceito.
+const MEDAL_PAID = new Set(['paid', 'shipped', 'delivered']);
 
 // payments/{checkoutId}: uma linha por compra, só para o painel financeiro (Functions
 // escrevem, treinador lê). net = soma do netValue de cada cobrança DISTINTA vista
 // (parts), então evento repetido ou parcela reenviada não soma duas vezes.
-function writePayment(tx, ref, ev, existing, { billing, checkout, uid }) {
+// medal: { current } para o pedido da medalha (sem billing; produto e preço próprios).
+function writePayment(tx, ref, ev, existing, { billing, checkout, uid, medal }) {
   const now = FieldValue.serverTimestamp();
-  const current = billing.status === 'paid' && billing.checkoutId === ev.checkoutId;
+  const current = medal ? medal.current : billing.status === 'paid' && billing.checkoutId === ev.checkoutId;
   let status = existing && existing.status;
   if (ev.kind === 'paid') {
     if (!status) status = checkout && CLOSED.has(checkout.status) ? checkout.status : 'paid';
@@ -123,19 +128,98 @@ function writePayment(tx, ref, ev, existing, { billing, checkout, uid }) {
     installments: ev.installments || (existing && existing.installments) || billing.installments || null,
     gross: existing && typeof existing.gross === 'number' ? existing.gross
       : (checkout && typeof checkout.value === 'number' ? checkout.value
-        : (typeof billing.value === 'number' ? billing.value : Number(PROGRAM_PRICE.value()))),
+        : (typeof billing.value === 'number' ? billing.value : Number((medal ? MEDAL_PRICE : PROGRAM_PRICE).value()))),
     net: nets.length ? round2(nets.reduce((a, b) => a + b, 0)) : null,
     parts,
-    product: PRODUCT,
+    product: medal ? MEDAL_PRODUCT : PRODUCT,
     paidAt: existing && existing.paidAt ? existing.paidAt : (ev.kind === 'paid' || current ? now : null),
     updatedAt: now,
   };
+  if (medal) doc.kind = 'medal';
   const coupon = (existing && existing.coupon) || (checkout && checkout.coupon) || billing.coupon || null;
   if (coupon) {
     doc.coupon = coupon;
     doc.percent = (existing && existing.percent) || (checkout && checkout.percent) || billing.percent || null;
   }
   tx.set(ref, doc);
+}
+
+// Evento de um checkout da medalha (checkouts/{id}.kind === 'medal'). Ramo à parte: não lê
+// nem escreve users.access nem private/billing, e o uid vem só do checkout que gravamos.
+// Chamado dentro da transação, antes de qualquer escrita; devolve o resultado do evento.
+async function processMedalEvent(db, tx, { eventRef, eventId, body, ev, checkout, coRef, uid }) {
+  const medalRef = db.doc(`users/${uid}/private/medal`);
+  const payRef = db.doc('payments/' + ev.checkoutId);
+  const [medalSnap, paySnap] = await Promise.all([tx.get(medalRef), tx.get(payRef)]);
+
+  const now = FieldValue.serverTimestamp();
+  tx.create(eventRef, {
+    type: typeof body.event === 'string' ? body.event : null,
+    uid, checkoutId: ev.checkoutId, paymentId: ev.paymentId, at: now,
+  });
+  const alert = (type, extra = {}) => tx.create(db.collection('alerts').doc(), {
+    type, uid, checkoutId: ev.checkoutId, eventId, at: now, resolved: false, ...extra,
+  });
+  if (!medalSnap.exists) {
+    if (ev.kind === 'paid') {
+      alert('unknown-uid');
+      return { error: 'checkout de medalha sem pedido', ev, uid };
+    }
+    return { result: 'ignorado', warn: 'evento de medalha sem pedido', ev, uid };
+  }
+  const medal = medalSnap.data();
+  const existing = paySnap.exists ? paySnap.data() : null;
+  const checkoutClosed = CLOSED.has(checkout.status);
+  const sameCheckout = medal.checkoutId === ev.checkoutId;
+  const current = sameCheckout && MEDAL_PAID.has(medal.status);
+
+  if (ev.kind === 'partial-refund') {
+    alert('medal-partial-refund', { refunded: ev.refunded });
+    if (existing) tx.update(payRef, { refunded: ev.refunded, updatedAt: now });
+    return { result: 'reembolso parcial da medalha: alerta', uid };
+  }
+
+  let result;
+  if (ev.kind === 'paid') {
+    if (checkoutClosed || (sameCheckout && medal.status === 'refunded')) {
+      alert('paid-closed-checkout');
+      result = 'medalha paga atrasada de checkout já ' + (checkoutClosed ? checkout.status : 'reembolsado');
+    } else if (MEDAL_PAID.has(medal.status) && !sameCheckout) {
+      // Outro checkout pago para quem já tem a medalha paga: só alerta (uma vez por checkout).
+      if (checkout.status !== 'paid') tx.update(coRef, { status: 'paid' });
+      if (!checkout.duplicate) {
+        tx.update(coRef, { duplicate: true });
+        alert('medal-duplicate');
+      }
+      result = 'duplicate';
+    } else {
+      if (!MEDAL_PAID.has(medal.status)) {
+        tx.update(medalRef, { status: 'paid', checkoutId: ev.checkoutId, paidAt: now, updatedAt: now });
+        result = 'medalha paga';
+      } else {
+        result = 'sem mudança';
+      }
+      if (checkout.status !== 'paid') tx.update(coRef, { status: 'paid' });
+    }
+  } else {
+    // Estorno/chargeback fecha o checkout; 'rejected' só o pago e atual (como no programa).
+    if ((ev.kind !== 'rejected' || current) && !checkoutClosed) tx.update(coRef, { status: ev.kind });
+    if (!current) {
+      result = 'não é o checkout pago atual';
+    } else if (medal.status === 'paid') {
+      tx.update(medalRef, { status: 'refunded', refundCount: FieldValue.increment(1), updatedAt: now });
+      result = 'medalha reembolsada';
+    } else {
+      // Já enviada: não sobrescreve status, rastreio nem datas; o treinador decide.
+      tx.update(medalRef, { refundCount: FieldValue.increment(1), updatedAt: now });
+      alert('medal-refunded-shipped');
+      result = 'reembolso com medalha já ' + medal.status + ': alerta';
+    }
+  }
+  // Linha financeira é só relatório (ver processEvent): falha aqui não desfaz o pedido.
+  try { writePayment(tx, payRef, ev, existing, { billing: {}, checkout, uid, medal: { current } }); }
+  catch (e) { console.error('payments: falha ao montar a linha financeira da medalha', e && e.message); }
+  return { result, uid };
 }
 
 async function processEvent(db, body) {
@@ -165,6 +249,13 @@ async function processEvent(db, body) {
     if (ev.uid && ours && ours !== ev.uid) {
       mismatch = { eventUid: ev.uid, checkoutUid: ours };
       uid = ours;
+    }
+
+    // Checkout da medalha: ramo próprio, decidido pelo checkout que gravamos (nunca pelo evento)
+    // e ANTES de qualquer leitura ou lógica de billing do programa.
+    if (checkout && checkout.kind === 'medal') {
+      if (!ours) return { result: 'ignorado', warn: 'checkout de medalha sem uid', ev };
+      return processMedalEvent(db, tx, { eventRef, eventId, body, ev, checkout, coRef, uid: ours });
     }
 
     // Todas as leituras antes da primeira escrita (regra das transações).

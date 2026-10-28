@@ -4,6 +4,7 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 import { startFakeAsaas } from '../fake-asaas.mjs';
 
 const require = createRequire(new URL('../../functions/package.json', import.meta.url));
@@ -12,6 +13,11 @@ const admin = require('firebase-admin');
 const PROJECT = 'demo-letz';
 const FN = `http://127.0.0.1:5001/${PROJECT}/southamerica-east1`;
 const AUTH = 'http://127.0.0.1:9099';
+
+const events = JSON.parse(readFileSync(new URL('./fixtures/asaas-events.json', import.meta.url), 'utf8'));
+// Token do webhook: o mesmo valor falso que o emulador lê de functions/.secret.local.
+const WEBHOOK_TOKEN = readFileSync(new URL('../../functions/.secret.local', import.meta.url), 'utf8')
+  .split('\n').find((l) => l.startsWith('ASAAS_WEBHOOK_TOKEN=')).slice('ASAAS_WEBHOOK_TOKEN='.length).trim();
 
 admin.initializeApp({ projectId: PROJECT });
 const db = admin.firestore();
@@ -119,7 +125,6 @@ describe('medalha: startMedalCheckout', () => {
   after(async () => {
     await wipe();
     await fake.close();
-    await admin.app().delete();
   });
 
   it('aluno concluído com o endereço do cadastro: 1 checkout de R$ 35, 1x, pedido pending', async () => {
@@ -264,6 +269,239 @@ describe('medalha: startMedalCheckout', () => {
     const r = await call('startMedalCheckout', { useSignupAddress: true }, s.token);
     assert.equal(r.error && r.error.status, 'UNAVAILABLE');
     assert.equal((await db.doc(`users/${s.uid}/private/medal`).get()).exists, false);
+  });
+});
+
+
+function hook(body) {
+  return fetch(`${FN}/asaasWebhook`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'asaas-access-token': WEBHOOK_TOKEN },
+    body: JSON.stringify(body),
+  });
+}
+
+function checkoutPaid(uid, checkoutId, id = 'evt_checkout_' + Math.random()) {
+  const e = structuredClone(events.checkoutPaidPix);
+  e.id = id;
+  e.checkout.id = checkoutId;
+  e.checkout.externalReference = uid;
+  return e;
+}
+
+function payment(fixture, checkoutId, { id, paymentId, event, value, netValue } = {}) {
+  const e = structuredClone(events[fixture]);
+  e.id = id || 'evt_' + fixture + '_' + Math.random();
+  if (event) e.event = event;
+  e.payment.checkoutSession = checkoutId;
+  if (paymentId) e.payment.id = paymentId;
+  if (value !== undefined) e.payment.value = value;
+  if (netValue !== undefined) e.payment.netValue = netValue;
+  return e;
+}
+
+const alertTypes = async () => (await db.collection('alerts').get()).docs.map((d) => d.data().type);
+
+// Aluno que concluiu, com o pedido da medalha aberto (pending) e o checkout dela gravado.
+async function withOrder() {
+  const s = await concluded();
+  const r = await call('startMedalCheckout', { useSignupAddress: true }, s.token);
+  assert.equal(r.error, undefined, JSON.stringify(r.error));
+  const m = await get(`users/${s.uid}/private/medal`);
+  s.checkoutId = m.checkoutId;
+  return s;
+}
+
+describe('medalha: webhook', () => {
+  before(async () => {
+    fake = await startFakeAsaas({ port: 7777 });
+  });
+  beforeEach(wipe);
+  after(async () => {
+    await wipe();
+    await fake.close();
+    await admin.app().delete();
+  });
+
+  const programState = async (uid) => ({
+    access: (await get('users/' + uid)).access,
+    billing: (await get(`users/${uid}/private/billing`)),
+  });
+
+  it('(a) pago: medal paid, access intacto, linha financeira da medalha, evento repetido não duplica', async () => {
+    const s = await withOrder();
+    const before = await programState(s.uid);
+    const e = payment('pixReceived', s.checkoutId, { value: 35, netValue: 34.01 });
+    assert.equal((await hook(e)).status, 200);
+    assert.equal((await hook(e)).status, 200);
+    assert.equal((await hook(checkoutPaid(s.uid, s.checkoutId))).status, 200);
+    const m = await get(`users/${s.uid}/private/medal`);
+    assert.equal(m.status, 'paid');
+    assert.ok(m.paidAt);
+    assert.equal(m.checkoutId, s.checkoutId);
+    assert.deepEqual(await programState(s.uid), before);
+    assert.equal((await get('checkouts/' + s.checkoutId)).status, 'paid');
+    const rows = await db.collection('payments').get();
+    assert.equal(rows.size, 1);
+    const row = rows.docs[0].data();
+    assert.equal(rows.docs[0].id, s.checkoutId);
+    assert.equal(row.product, 'Medalha Letz bora!');
+    assert.equal(row.kind, 'medal');
+    assert.equal(row.status, 'paid');
+    assert.equal(row.gross, 35);
+    assert.equal(row.net, 34.01);
+    assert.equal((await alertTypes()).length, 0);
+  });
+
+  it('(b) pagamento de outro checkout de quem já pagou: alerta medal-duplicate uma vez, status segue', async () => {
+    const s = await withOrder();
+    await hook(payment('pixReceived', s.checkoutId));
+    const other = 'checkout-medalha-duplicado';
+    await db.doc('checkouts/' + other).set({ kind: 'medal', uid: s.uid, value: 35, status: 'active', createdAt: new Date(), expiresAt: new Date() });
+    assert.equal((await hook(payment('pixReceived', other, { paymentId: 'pay_dup_1' }))).status, 200);
+    assert.equal((await hook(checkoutPaid(s.uid, other))).status, 200);
+    const m = await get(`users/${s.uid}/private/medal`);
+    assert.equal(m.status, 'paid');
+    assert.equal(m.checkoutId, s.checkoutId);
+    assert.deepEqual(await alertTypes(), ['medal-duplicate']);
+    assert.equal((await get('checkouts/' + other)).status, 'paid');
+    assert.equal((await get(`users/${s.uid}/private/billing`)).duplicate, undefined);
+  });
+
+  it('(c) reembolso total com paid: refunded, refundCount 1, sem alerta; chargeback repetido não conta de novo', async () => {
+    const s = await withOrder();
+    await hook(payment('pixReceived', s.checkoutId));
+    assert.equal((await hook(payment('cardRefunded', s.checkoutId))).status, 200);
+    assert.equal((await get('payments/' + s.checkoutId)).status, 'refunded');
+    assert.equal((await hook(payment('cardChargeback', s.checkoutId))).status, 200);
+    const m = await get(`users/${s.uid}/private/medal`);
+    assert.equal(m.status, 'refunded');
+    assert.equal(m.refundCount, 1);
+    assert.equal((await alertTypes()).length, 0);
+    assert.equal((await get('checkouts/' + s.checkoutId)).status, 'refunded');
+    assert.equal((await get('users/' + s.uid)).access, 'active');
+    // pago tardio do checkout reembolsado: alerta e nada de reativar o pedido
+    await hook(payment('pixReceived', s.checkoutId, { paymentId: 'pay_tardio_1' }));
+    assert.equal((await get(`users/${s.uid}/private/medal`)).status, 'refunded');
+    assert.deepEqual(await alertTypes(), ['paid-closed-checkout']);
+  });
+
+  for (const status of ['shipped', 'delivered']) {
+    it(`(d) reembolso com ${status}: status, rastreio e datas iguais, refundCount +1, alerta medal-refunded-shipped`, async () => {
+      const s = await withOrder();
+      await hook(payment('pixReceived', s.checkoutId));
+      const ts = admin.firestore.Timestamp.fromMillis(Date.now() - 864e5);
+      await db.doc(`users/${s.uid}/private/medal`).update({
+        status, trackingCode: 'BR123456789BR', shippedAt: ts, deliveredAt: status === 'delivered' ? ts : null,
+      });
+      const before = await get(`users/${s.uid}/private/medal`);
+      assert.equal((await hook(payment('cardRefunded', s.checkoutId))).status, 200);
+      const m = await get(`users/${s.uid}/private/medal`);
+      assert.equal(m.status, status);
+      assert.equal(m.trackingCode, 'BR123456789BR');
+      assert.deepEqual(m.shippedAt, before.shippedAt);
+      assert.deepEqual(m.deliveredAt, before.deliveredAt);
+      assert.equal(m.refundCount, 1);
+      assert.deepEqual(await alertTypes(), ['medal-refunded-shipped']);
+    });
+  }
+
+  it('(e) reembolso parcial: só o alerta medal-partial-refund', async () => {
+    const s = await withOrder();
+    await hook(payment('pixReceived', s.checkoutId));
+    const before = await get(`users/${s.uid}/private/medal`);
+    const e = payment('pixReceived', s.checkoutId, { event: 'PAYMENT_PARTIALLY_REFUNDED', paymentId: 'pay_parcial_m' });
+    e.payment.refunds = [{ status: 'DONE', value: 5 }];
+    assert.equal((await hook(e)).status, 200);
+    assert.equal((await hook(e)).status, 200);
+    const list = (await db.collection('alerts').get()).docs.map((d) => d.data());
+    assert.equal(list.length, 1);
+    assert.equal(list[0].type, 'medal-partial-refund');
+    assert.equal(list[0].uid, s.uid);
+    assert.equal(list[0].refunded, 5);
+    const m = await get(`users/${s.uid}/private/medal`);
+    assert.equal(m.status, 'paid');
+    assert.equal(m.refundCount, 0);
+    assert.equal(m.updatedAt.toMillis(), before.updatedAt.toMillis());
+    assert.equal((await get('payments/' + s.checkoutId)).refunded, 5);
+  });
+
+  it('(f) reembolso do programa conta billing.refundCount e bloqueia; chargeback depois não conta de novo', async () => {
+    const p = person();
+    const r = await call('signup', p);
+    assert.equal(r.error, undefined, JSON.stringify(r.error));
+    const uid = (await admin.auth().getUserByEmail(p.email)).uid;
+    const checkoutId = (await get(`users/${uid}/private/billing`)).checkoutId;
+    await hook(checkoutPaid(uid, checkoutId));
+    assert.equal((await get('users/' + uid)).access, 'active');
+    await hook(payment('cardRefunded', checkoutId));
+    await hook(payment('cardChargeback', checkoutId));
+    const st = await programState(uid);
+    assert.equal(st.access, 'blocked');
+    assert.equal(st.billing.status, 'refunded');
+    assert.equal(st.billing.refundCount, 1);
+    assert.equal((await db.doc(`users/${uid}/private/medal`).get()).exists, false);
+  });
+
+  it('(g) pedido de medalha defeituoso não impede o pagamento do programa de ativar', async () => {
+    const p = person();
+    const r = await call('signup', p);
+    assert.equal(r.error, undefined, JSON.stringify(r.error));
+    const uid = (await admin.auth().getUserByEmail(p.email)).uid;
+    const checkoutId = (await get(`users/${uid}/private/billing`)).checkoutId;
+    await db.doc(`users/${uid}/private/medal`).set({ status: 42, refundCount: 'x', checkoutId: { a: 1 } });
+    assert.equal((await hook(checkoutPaid(uid, checkoutId))).status, 200);
+    assert.equal((await get('users/' + uid)).access, 'active');
+    assert.equal((await get(`users/${uid}/private/billing`)).status, 'paid');
+    assert.equal((await get('payments/' + checkoutId)).product, 'Do 0 aos 5 km');
+    assert.equal((await get(`users/${uid}/private/medal`)).status, 42);
+  });
+
+  for (const billingStatus of ['pending', 'refunded', 'blocked']) {
+    it(`(h) checkout da medalha nunca toca billing nem access (billing do programa ${billingStatus})`, async () => {
+      const s = await withOrder();
+      const access = billingStatus === 'pending' ? 'pending' : 'blocked';
+      await db.doc('users/' + s.uid).update({ access });
+      await db.doc(`users/${s.uid}/private/billing`).update({ status: billingStatus === 'blocked' ? 'paid' : billingStatus });
+      const before = await programState(s.uid);
+      // Evento com externalReference do uid (como no programa), pagamento, reembolso, chargeback e parcial.
+      for (const e of [
+        checkoutPaid(s.uid, s.checkoutId),
+        payment('pixReceived', s.checkoutId),
+        payment('cardRefunded', s.checkoutId),
+        payment('cardChargeback', s.checkoutId, { paymentId: 'pay_cb_h' }),
+        payment('pixReceived', s.checkoutId, { event: 'PAYMENT_PARTIALLY_REFUNDED', paymentId: 'pay_pr_h' }),
+        payment('cardRefunded', s.checkoutId, { event: 'PAYMENT_REPROVED_BY_RISK_ANALYSIS', paymentId: 'pay_rj_h' }),
+      ]) assert.equal((await hook(e)).status, 200);
+      assert.deepEqual(await programState(s.uid), before);
+      const bill = await get(`users/${s.uid}/private/billing`);
+      assert.equal(bill.refundCount, undefined);
+      assert.equal(bill.paidAt, undefined);
+    });
+  }
+
+  it('(h) pagamento do programa nunca marca a medalha, mesmo com pedido pendente', async () => {
+    const s = await concluded();
+    await call('startMedalCheckout', { useSignupAddress: true }, s.token);
+    const before = await get(`users/${s.uid}/private/medal`);
+    const programCheckout = 'checkout-programa-h';
+    await db.doc('checkouts/' + programCheckout).set({ uid: s.uid, status: 'active', createdAt: new Date(), expiresAt: new Date() });
+    await db.doc(`users/${s.uid}/private/billing`).update({ status: 'pending', checkoutId: programCheckout });
+    await db.doc('users/' + s.uid).update({ access: 'pending' });
+    await hook(checkoutPaid(s.uid, programCheckout));
+    await hook(payment('pixReceived', programCheckout, { paymentId: 'pay_prog_h' }));
+    assert.equal((await get('users/' + s.uid)).access, 'active');
+    assert.deepEqual(await get(`users/${s.uid}/private/medal`), before);
+  });
+
+  it('(h) checkout que não é nosso, ou kind medal sem pedido: sem efeito no programa', async () => {
+    const s = await signupOk();
+    const before = await programState(s.uid);
+    await hook(payment('pixReceived', 'checkout-de-outro-produto'));
+    await db.doc('checkouts/orfao-medalha').set({ kind: 'medal', uid: s.uid, value: 35, status: 'active', createdAt: new Date(), expiresAt: new Date() });
+    assert.equal((await hook(checkoutPaid(s.uid, 'orfao-medalha'))).status, 200);
+    assert.deepEqual(await programState(s.uid), before);
+    assert.deepEqual(await alertTypes(), ['unknown-uid']);
   });
 });
 
