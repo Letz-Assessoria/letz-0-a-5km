@@ -83,6 +83,7 @@ service cloud.firestore {
       allow read: if signedIn();
       // create só acontece se o doc não existe; com doc existente vira update (negado).
       allow create: if signedIn()
+        && handle.matches('^[a-z0-9._]{3,30}$')
         && request.resource.data.keys().hasOnly(['uid'])
         && request.resource.data.uid == request.auth.uid;
       allow update: if false;

@@ -145,6 +145,14 @@ describe('firestore.rules', () => {
     await assertFails(updateDoc(doc(db(ALICE), 'users', ALICE), { handle: 'dobob' }));
   });
 
+  it('handles: só aceita ids no formato [a-z0-9._]{3,30}', async () => {
+    const f = db(ALICE);
+    await assertFails(setDoc(doc(f, 'handles', 'AB'), { uid: ALICE }));
+    await assertFails(setDoc(doc(f, 'handles', 'com espaco'), { uid: ALICE }));
+    await assertFails(setDoc(doc(f, 'handles', 'x'.repeat(31)), { uid: ALICE }));
+    await assertSucceeds(setDoc(doc(f, 'handles', 'alice.ok_1'.replace('_', '.')), { uid: ALICE }));
+  });
+
   it('users: trocar handle com reserva na mesma batch é permitido', async () => {
     const f = db(ALICE);
     const b = writeBatch(f);
