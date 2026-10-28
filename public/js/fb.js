@@ -487,6 +487,7 @@ function athleteRow(uid, u, p, b) {
       status: b.status || 'pending', method: b.method || '', installments: Number(b.installments) || 0,
       paidAt: ms(b.paidAt), duplicate: !!b.duplicate, cpfConflict: !!b.cpfConflict,
       coupon: b.coupon || '', percent: Number(b.percent) || 0, value: typeof b.value === 'number' ? b.value : null, partner: b.partner === true,
+      refundRequestedAt: ms(b.refundRequestedAt), refundCount: Number(b.refundCount) || 0,
     } : null,
   };
 }
@@ -536,13 +537,72 @@ function listPayments(cb) {
       return {
         checkoutId: d.id, uid: x.uid || '', status: x.status || '', method: x.method || '',
         installments: Number(x.installments) || 0, gross: Number(x.gross) || 0,
-        net: typeof x.net === 'number' ? x.net : null, product: x.product || '',
+        net: typeof x.net === 'number' ? x.net : null, product: x.product || '', kind: x.kind || '',
         coupon: x.coupon || '', percent: Number(x.percent) || 0,
         paidAt: ms(x.paidAt), updatedAt: ms(x.updatedAt),
       };
     })),
     (err) => { fail(err); cb([]); },
   ));
+}
+// Pedidos de medalha (admin): quem concluiu (users.concluded) + private/medal de cada um.
+// Um listener por pedido: depois da primeira leitura só chegam as mudanças, sem reler a turma toda.
+const callUpdateMedal = httpsCallable(functions, 'updateMedalOrder');
+const callResendMedal = httpsCallable(functions, 'resendMedalEmail');
+function medalOrderRow(uid, u, m) {
+  const st = m && ['paid', 'shipped', 'delivered', 'refunded'].includes(m.status) ? m.status : 'none';
+  return {
+    uid, name: u.name || '', handle: u.handle || '', status: st,
+    address: (m && m.address) || null, paidAt: ms(m && m.paidAt),
+    trackingCode: (m && m.trackingCode) || '', shippedAt: (m && m.shippedAt) || '', deliveredAt: (m && m.deliveredAt) || '',
+    emailedAt: ms(m && m.emailedAt), emailedCount: Number(m && m.emailedCount) || 0,
+    refundRequestedAt: ms(m && m.refundRequestedAt), refundCount: Number((m && m.refundCount) || 0),
+  };
+}
+function listMedalOrders(cb) {
+  const users = new Map();
+  const orders = new Map();
+  const subs = new Map();
+  let alive = true;
+  const emit = () => {
+    if (!alive) return;
+    for (const uid of users.keys()) if (!orders.has(uid)) return;
+    cb(Array.from(users, ([uid, u]) => medalOrderRow(uid, u, orders.get(uid))).sort((a, c) => (a.name || '').localeCompare(c.name || '', 'pt-BR')));
+  };
+  const watch = (uid) => onSnapshot(doc(db, 'users', uid, 'private', 'medal'),
+    (snap) => { orders.set(uid, snap.exists() ? snap.data({ serverTimestamps: 'estimate' }) : null); emit(); },
+    (err) => { fail(err); orders.set(uid, null); emit(); });
+  const off = whenSession((s) => !!(s && s.user && s.claims && s.claims.admin === true), () => onSnapshot(
+    query(collection(db, 'users'), where('concluded', '==', true)),
+    (snap) => {
+      snap.docChanges().forEach((c) => {
+        const uid = c.doc.id;
+        if (c.type === 'removed') {
+          users.delete(uid); orders.delete(uid);
+          if (subs.has(uid)) { subs.get(uid)(); subs.delete(uid); }
+        } else {
+          users.set(uid, c.doc.data());
+          if (!subs.has(uid)) subs.set(uid, watch(uid));
+        }
+      });
+      emit();
+    },
+    (err) => { fail(err); if (alive) cb([]); },
+  ));
+  return () => { alive = false; off(); subs.forEach((f) => f()); subs.clear(); };
+}
+// Datas AAAA-MM-DD em texto; sem data o servidor usa hoje. Devolve { emailed }.
+async function updateMedalOrder({ uid, status, trackingCode, shippedAt, deliveredAt }) {
+  const data = { uid, status };
+  if (trackingCode !== undefined) data.trackingCode = trackingCode;
+  if (shippedAt) data.shippedAt = shippedAt;
+  if (deliveredAt) data.deliveredAt = deliveredAt;
+  const r = await callUpdateMedal(data);
+  return { emailed: r.data.emailed === true };
+}
+async function resendMedalEmail(uid) {
+  const r = await callResendMedal({ uid });
+  return { emailed: r.data.emailed === true };
 }
 // Parceiros e cupons (admin). createPartner/createCoupon são callables; a lista é ao vivo.
 const callCreatePartner = httpsCallable(functions, 'createPartner');
@@ -616,6 +676,6 @@ window.LetzFB = {
   loadMyReactions, toggleReaction, addComment, deleteComment, watchComments,
   postMedal, watchMyMedalPost,
   startMedalCheckout, requestRefund, rebuyProgram, loadSignupAddress, watchMedal, watchBilling,
-  saveConfig, listAthletes, listAlerts, listPayments, resolveAlert, createPartner, createCoupon, listCoupons, listCouponUses, setCouponActive, setCouponMax, setCouponPercent, setAccess, setPostHidden, setCommentHidden,
+  saveConfig, listAthletes, listMedalOrders, updateMedalOrder, resendMedalEmail, listAlerts, listPayments, resolveAlert, createPartner, createCoupon, listCoupons, listCouponUses, setCouponActive, setCouponMax, setCouponPercent, setAccess, setPostHidden, setCommentHidden,
 };
 document.dispatchEvent(new Event('letzfb-ready'));
