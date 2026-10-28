@@ -3,6 +3,7 @@
 import { test, expect } from '@playwright/test';
 import {
   admin, auth, checkoutPaid, clearRateLimits, db, fillAddress, makeCoach, mockViaCep, person, webhookToken, waitUntil, FAKE, WEBHOOK,
+  skipGuide,
 } from './helpers.mjs';
 
 const CHECKOUT_URL = /^http:\/\/127\.0\.0\.1:7777\/checkoutSession\/show\/[^/]+$/;
@@ -11,6 +12,7 @@ test.beforeEach(async () => { await clearRateLimits(); pageErrors = []; });
 test.afterEach(() => { expect(pageErrors, 'erros de JavaScript na página').toEqual([]); });
 
 async function login(page, u) {
+  await skipGuide(page);
   await page.goto('/#/entrar');
   await page.getByLabel('E-mail').fill(u.email);
   await page.getByLabel('Senha', { exact: true }).fill(u.password);

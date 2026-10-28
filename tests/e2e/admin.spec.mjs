@@ -3,6 +3,7 @@ import { test, expect } from '@playwright/test';
 import {
   admin, auth, clearRateLimits, db, fillAddress, makeAthlete, makeCoach, makeUser, mockViaCep, person, resetStart, seedConcluded, setStart,
   uniqueHandle, waitUntil,
+  skipGuide,
 } from './helpers.mjs';
 
 let pageErrors = [];
@@ -17,6 +18,7 @@ test.afterEach(() => {
 test.afterAll(async () => { await resetStart(); });
 
 async function login(page, u) {
+  await skipGuide(page);
   await page.goto('/#/entrar');
   await page.getByLabel('E-mail').fill(u.email);
   await page.getByLabel('Senha', { exact: true }).fill(u.password);

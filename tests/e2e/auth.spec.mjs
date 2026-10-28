@@ -3,6 +3,7 @@
 import { test, expect } from '@playwright/test';
 import {
   auth, callable, checkoutPaid, clearRateLimits, fillAddress, makeCoach, makeUser, mockViaCep, person, webhookToken, FAKE, WEBHOOK,
+  skipGuide,
 } from './helpers.mjs';
 
 const CHECKOUT_URL = /^http:\/\/127\.0\.0\.1:7777\/checkoutSession\/show\/[^/]+$/;
@@ -18,6 +19,7 @@ test.afterEach(() => {
 });
 
 async function login(page, email, password) {
+  await skipGuide(page);
   await page.goto('/#/entrar');
   await page.getByLabel('E-mail').fill(email);
   await page.getByLabel('Senha', { exact: true }).fill(password);
@@ -56,9 +58,112 @@ test('cadastro → checkout fake → webhook pago → app', async ({ page }) => 
   });
   expect((await r.json()).status).toBe(200);
 
-  // A tela muda sozinha quando users/{uid}.access vira active.
+  // A tela muda sozinha quando users/{uid}.access vira active: primeiro o guia de instalação.
+  await expect(page).toHaveURL(/#\/instalar$/);
+  await expect(page.getByText('Pagamento confirmado')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Já instalei, continuar/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Fazer depois' })).toBeVisible();
+  await expect(page.locator('.backbtn')).toHaveCount(0);
+
+  // Recarregar durante o guia mantém o guia.
+  await page.reload();
+  await expect(page).toHaveURL(/#\/instalar$/);
+  await expect(page.getByText('Pagamento confirmado')).toBeVisible();
+
+  await page.getByRole('button', { name: /Já instalei, continuar/ }).click();
   await expect(page).toHaveURL(/#\/perfil$/);
   await expect(page.getByRole('heading', { name: /Quem é/ })).toBeVisible();
+
+  // Não volta a aparecer ao recarregar nem pelo voltar do navegador.
+  await page.reload();
+  await expect(page).toHaveURL(/#\/perfil$/);
+  await page.goBack();
+  await expect(page.getByText('Pagamento confirmado')).toHaveCount(0);
+});
+
+test.describe('guia de instalação para aluno ativo', () => {
+  async function enter(page, u) {
+    await page.goto('/#/entrar');
+    await page.getByLabel('E-mail').fill(u.email);
+    await page.getByLabel('Senha', { exact: true }).fill(u.password);
+    await page.getByRole('button', { name: 'Entrar' }).click();
+  }
+
+  test('"Fazer depois" segue para o perfil e não repete', async ({ page }) => {
+    const u = await makeUser('active');
+    await enter(page, u);
+    await expect(page).toHaveURL(/#\/instalar$/);
+    await page.getByRole('button', { name: 'Fazer depois' }).click();
+    await expect(page).toHaveURL(/#\/perfil$/);
+    await page.reload();
+    await expect(page).toHaveURL(/#\/perfil$/);
+    expect(await page.evaluate(() => localStorage.getItem('letz.installGuideSeen'))).toBe('1');
+  });
+
+  test('quem já viu o guia entra direto', async ({ page }) => {
+    await skipGuide(page);
+    const u = await makeUser('active');
+    await enter(page, u);
+    await expect(page).toHaveURL(/#\/perfil$/);
+  });
+
+  test('app instalado (standalone) pula o guia', async ({ page }) => {
+    await page.addInitScript(() => {
+      const mm = window.matchMedia.bind(window);
+      window.matchMedia = (q) => (/display-mode:\s*standalone/.test(q) ? { matches: true, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : mm(q));
+    });
+    const u = await makeUser('active');
+    await enter(page, u);
+    await expect(page).toHaveURL(/#\/perfil$/);
+  });
+
+  test('rotas protegidas levam ao guia uma vez e não prendem', async ({ page }) => {
+    const u = await makeUser('active', { profiled: true, welcomed: true });
+    await enter(page, u);
+    await expect(page).toHaveURL(/#\/instalar$/);
+    await page.goto('/#/app/feed');
+    await page.reload();
+    await expect(page).toHaveURL(/#\/instalar$/);
+    await page.getByRole('button', { name: 'Fazer depois' }).click();
+    await expect(page).toHaveURL(/#\/app\/treinos$/);
+    await page.goto('/#/app/feed');
+    await page.reload();
+    await expect(page).toHaveURL(/#\/app\/feed$/);
+  });
+
+  test('#/instalar de propósito mostra Voltar e volta ao app', async ({ page }) => {
+    await skipGuide(page);
+    const u = await makeUser('active', { profiled: true, welcomed: true });
+    await enter(page, u);
+    await expect(page).toHaveURL(/#\/app\/treinos$/);
+    await page.goto('/#/instalar');
+    await expect(page.getByText('Pagamento confirmado')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Voltar', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Fazer depois' })).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.getByRole('button', { name: /Voltar ao app/ }).click();
+    await expect(page).toHaveURL(/#\/app\/treinos$/);
+  });
+
+  test('guia em 390px sem rolagem horizontal; sem login mantém o texto antigo', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.goto('/#/instalar');
+    await expect(page.getByText('Antes de entrar')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Já instalei, entrar/ })).toBeVisible();
+    const u = await makeUser('active');
+    await enter(page, u);
+    await expect(page).toHaveURL(/#\/instalar$/);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+
+  test('sem localStorage o guia aparece uma vez por sessão', async ({ page }) => {
+    await page.addInitScript(() => { Storage.prototype.getItem = () => { throw new Error('x'); }; Storage.prototype.setItem = () => { throw new Error('x'); }; });
+    const u = await makeUser('active');
+    await enter(page, u);
+    await expect(page).toHaveURL(/#\/instalar$/);
+    await page.getByRole('button', { name: 'Fazer depois' }).click();
+    await expect(page).toHaveURL(/#\/perfil$/);
+  });
 });
 
 test('cadastro com o Asaas fora do ar entra e mostra Concluir pagamento', async ({ page }) => {
@@ -142,7 +247,7 @@ test('senha errada mostra mensagem em português', async ({ page }) => {
   await expect(page.getByRole('alert')).toHaveText('E-mail ou senha incorretos.');
   await expect(page).toHaveURL(/#\/entrar$/);
 
-  // Com a senha certa, o aluno ativo entra (primeiro acesso → perfil).
+  // Com a senha certa, o aluno ativo entra (primeiro acesso → perfil, aparelho que já viu o guia).
   await page.getByLabel('Senha', { exact: true }).fill(u.password);
   await page.getByRole('button', { name: 'Entrar' }).click();
   await expect(page).toHaveURL(/#\/perfil$/);

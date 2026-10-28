@@ -3,6 +3,7 @@ import { test, expect } from '@playwright/test';
 import {
   admin, auth, callable, checkoutPaid, clearRateLimits, db, emitMedalPaid, FAKE, makeAthlete, makeCoach, makeUser, mockViaCep, person,
   resetStart, seedConcluded, setStart, storageObject, uniqueHandle, waitUntil, webhookToken, WEBHOOK,
+  skipGuide,
 } from './helpers.mjs';
 
 let pageErrors = [];
@@ -17,6 +18,7 @@ test.afterEach(() => {
 test.afterAll(async () => { await resetStart(); });
 
 async function login(page, u, hash = '#/entrar') {
+  await skipGuide(page);
   await page.goto('/' + hash);
   await page.getByLabel('E-mail').fill(u.email);
   await page.getByLabel('Senha', { exact: true }).fill(u.password);
