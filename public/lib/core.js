@@ -49,6 +49,24 @@
     return d.length === 10 || d.length === 11 ? d : null;
   }
 
+  function normalizeCep(s) {
+    var d = String(s == null ? '' : s).replace(/\D/g, '');
+    return d.length === 8 ? d : null;
+  }
+
+  // Endereço do cadastro (vai para o checkout do Asaas). Devolve o objeto limpo ou null.
+  var UF_RE = /^[A-Z]{2}$/;
+  function cleanAddress(a) {
+    if (!a || typeof a !== 'object') return null;
+    var t = function (v) { return typeof v === 'string' ? v.trim().replace(/\s+/g, ' ') : ''; };
+    var cep = normalizeCep(a.cep);
+    var street = t(a.street), number = t(a.number), complement = t(a.complement), district = t(a.district), city = t(a.city);
+    var uf = typeof a.uf === 'string' ? a.uf.trim().toUpperCase() : '';
+    if (!cep || !street || street.length > 100 || !number || number.length > 10 || complement.length > 40 ||
+        !district || district.length > 60 || !city || city.length > 60 || !UF_RE.test(uf)) return null;
+    return { cep: cep, street: street, number: number, complement: complement, district: district, city: city, uf: uf };
+  }
+
   function cleanHandle(v) { return v.toLowerCase().replace(/^@+/, '').replace(/[^a-z0-9._]/g, '').slice(0, 30); }
 
   // Projeto do Firebase por host. Só o site/preview de DEV usa dev; qualquer outro
@@ -65,6 +83,6 @@
     WEEK_MS: WEEK_MS, DEFAULT_START_ISO: DEFAULT_START_ISO,
     weekOpen: weekOpen, weekIndex: weekIndex, pointedKeys: pointedKeys, pointsFor: pointsFor,
     isConcluded: isConcluded, isValidCpf: isValidCpf, normalizeCpf: normalizeCpf,
-    normalizePhone: normalizePhone, cleanHandle: cleanHandle
+    normalizePhone: normalizePhone, normalizeCep: normalizeCep, cleanAddress: cleanAddress, cleanHandle: cleanHandle
   };
 });

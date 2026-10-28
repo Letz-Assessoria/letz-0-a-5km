@@ -1,7 +1,7 @@
 // e2e do painel do treinador: acesso, bloqueio, moderação, frete, data da turma e vendas.
 import { test, expect } from '@playwright/test';
 import {
-  admin, auth, clearRateLimits, db, makeAthlete, makeCoach, makeUser, person, resetStart, seedConcluded, setStart,
+  admin, auth, clearRateLimits, db, fillAddress, makeAthlete, makeCoach, makeUser, mockViaCep, person, resetStart, seedConcluded, setStart,
   uniqueHandle, waitUntil,
 } from './helpers.mjs';
 
@@ -168,11 +168,13 @@ test('fechar vendas faz o cadastro mostrar vendas encerradas', async ({ page, br
   const p = person();
   const ctx = await browser.newContext();
   const pc = await ctx.newPage();
+  await mockViaCep(pc);
   await pc.goto('/#/cadastro');
   await pc.getByLabel('Nome completo').fill(p.name);
   await pc.getByLabel('E-mail').fill(p.email);
   await pc.getByLabel('CPF').fill(p.cpf);
   await pc.getByLabel('Celular com DDD').fill(p.phone);
+  await fillAddress(pc, p);
   await pc.getByLabel('Senha', { exact: true }).fill(p.password);
   await pc.getByLabel('Confirme a senha').fill(p.password);
   await pc.getByLabel(/Li e aceito a política de privacidade/).check();

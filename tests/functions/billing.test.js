@@ -77,6 +77,7 @@ function person(extra = {}) {
     password: 'senha-forte-123',
     cpf: makeCpf(),
     phone: '(81) 99999-0000',
+    address: { cep: '50050-000', street: 'Rua da Aurora', number: '100', complement: 'Apto 2', district: 'Boa Vista', city: 'Recife', uf: 'PE' },
     acceptPolicy: true,
     ...extra,
   };
@@ -189,6 +190,25 @@ describe('cadastro, retomada e webhook', () => {
     assert.equal(sent[0].items[0].value, 159);
     assert.equal(sent[0].installment.maxInstallmentCount, 12);
     assert.equal(sent[0].callback.successUrl, 'http://localhost:5050/#/confirmando');
+    // O checkout abre com os dados do cadastro (sem CPF formatado nem telefone com máscara).
+    const cd = sent[0].customerData;
+    assert.equal(cd.name, p.name);
+    assert.equal(cd.cpfCnpj, p.cpf.replace(/\D/g, ''));
+    assert.equal(cd.email, p.email);
+    assert.equal(cd.phone, '81999990000');
+    assert.deepEqual([cd.address, cd.addressNumber, cd.complement, cd.province, cd.postalCode, cd.city],
+      ['Rua da Aurora', '100', 'Apto 2', 'Boa Vista', '50050000', 'Recife']);
+    const profile = (await db.doc(`users/${user.uid}/private/profile`).get()).data();
+    assert.equal(profile.address.cep, '50050000');
+  });
+
+  it('signup: endereço ausente ou inválido → invalid-argument, sem criar conta', async () => {
+    for (const address of [undefined, { ...person().address, number: '' }, { ...person().address, uf: 'XYZ' }]) {
+      const p = person({ address });
+      const r = await call('signup', p);
+      assert.equal(r.error && r.error.status, 'INVALID_ARGUMENT', JSON.stringify(r));
+      await assert.rejects(admin.auth().getUserByEmail(p.email));
+    }
   });
 
   it('signup: CPF repetido → already-exists', async () => {

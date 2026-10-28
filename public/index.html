@@ -446,6 +446,8 @@ details.faq p{color:var(--muted);padding-bottom:16px;max-width:65ch}
 @media (min-width:640px){.sheet-bg:has(.ship){align-items:center}.sheet.ship{border-radius:26px;max-width:480px}}
 .shipmed{width:96px;height:96px;object-fit:cover;border-radius:16px;align-self:flex-start}
 .g2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+.addrline{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border:1px solid var(--line,rgba(127,127,127,.28));border-radius:12px;font-size:14px;line-height:1.4}
+.addrline span{min-width:0;overflow-wrap:anywhere}
 .field select{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:0 14px;min-height:52px;width:100%;color:var(--ink);font:inherit}
 .paybox{display:flex;flex-direction:column;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:18px}
 .paybox .amount{font-size:32px;font-weight:600}
@@ -3018,12 +3020,22 @@ function vCadastro(){var d=V.sg,f=function(id,lab,attrs,hint){return '<div class
  f('email','E-mail','type="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254" placeholder="voce@exemplo.com"')+
  f('cpf','CPF','type="text" inputmode="numeric" autocomplete="off" maxlength="14" placeholder="000.000.000-00"','O pagamento fica no seu nome, com este CPF.')+
  f('phone','Celular com DDD','type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="(81) 99999-9999"')+
+ vCadAddr(d,f)+
  f('pass','Senha','type="password" autocomplete="new-password" maxlength="128"','Pelo menos 6 caracteres. É com ela que você entra no app.')+
  f('pass2','Confirme a senha','type="password" autocomplete="new-password" maxlength="128"')+
  '<label class="check" for="sg-accept"><input id="sg-accept" type="checkbox"'+(d.accept?' checked':'')+'><span>Li e aceito a <button type="button" class="linkbtn" data-act="to-privacy">política de privacidade</button>.</span></label>'+
  (V.serr?'<p class="err" role="alert">'+esc(V.serr)+'</p>':'')+
  '<button class="btn go wide" type="submit"'+(V.busy?' disabled':'')+'>'+(V.busy?'Criando sua conta…':'Criar conta e ir para o pagamento '+ic('arrow'))+'</button></form>'+
  '<button class="linkbtn" data-act="to-login">Já tenho conta. Entrar</button>';}
+// Endereço do cadastro: só o CEP aparece de início. Achado o CEP, o endereço vira uma linha
+// de conferência e pede só o número (complemento opcional). Rua, bairro, cidade e UF só
+// aparecem se o CEP não for achado ou se a pessoa pedir para corrigir.
+function vCadAddr(d,f){var open=!!d.addrOpen,man=!!d.addrManual,line=[d.street,d.district,(d.city?d.city+(d.uf?'/'+d.uf:''):'')].filter(Boolean).join(' · ');
+ return '<div class="field"><label for="sg-cep">CEP</label><input id="sg-cep" type="text" inputmode="numeric" autocomplete="postal-code" maxlength="9" placeholder="00000-000" value="'+esc(d.cep||'')+'"><small id="sg-cep-msg" aria-live="polite">'+esc(d.cepMsg||'Seu endereço entra no pagamento, assim você não digita de novo.')+'</small></div>'+
+ (open&&!man&&line?'<div class="addrline"><span>'+esc(line)+'</span><button type="button" class="linkbtn" data-act="sg-addr-edit">Corrigir</button></div>':'')+
+ (open&&man?f('street','Rua ou avenida','type="text" autocomplete="address-line1" maxlength="100"')+f('district','Bairro','type="text" maxlength="60"')+
+  '<div class="g2">'+f('city','Cidade','type="text" autocomplete="address-level2" maxlength="60"')+'<div class="field"><label for="sg-uf">Estado</label><select id="sg-uf" autocomplete="address-level1"><option value="">UF</option>'+UFS.map(function(u){return '<option'+(d.uf===u?' selected':'')+'>'+u+'</option>';}).join('')+'</select></div></div>':'')+
+ (open?'<div class="g2">'+f('number','Número','type="text" autocomplete="off" maxlength="10" placeholder="123 ou S/N"')+f('complement','Complemento <span class="muted">(opcional)</span>','type="text" autocomplete="address-line2" maxlength="40"')+'</div>':'');}
 function vEsqueci(){return backBtn('Voltar','login')+
  '<div class="stack" style="gap:6px"><span class="label">Sua conta</span><h1 class="disp" style="font-size:clamp(44px,13vw,72px)">Esqueci<br>a senha</h1><p class="muted">Digite o e-mail da sua conta. Enviamos um link para você criar uma senha nova.</p></div>'+
  (V.fsent?'<p class="note" role="status">'+ic('check')+'<span>Se houver uma conta com este e-mail, o link chega em alguns minutos. Confira também a caixa de spam.</span></p><button class="btn go wide" data-act="to-login">Voltar para entrar '+ic('arrow')+'</button>':
@@ -3082,12 +3094,12 @@ function vPrivacy(){var sec=function(t,b){return '<section class="card stack"><h
  return '<div class="top"><div class="brand"><img src="'+LOGO+'" alt="Letz"><i class="sep"></i><span>Privacidade</span></div><button class="iconbtn" data-act="privacy-back" aria-label="Voltar">'+ic('x')+'</button></div>'+
  '<div class="stack" style="gap:6px"><span class="label">Atualizada em 28 de outubro de 2026</span><h1 class="disp" style="font-size:clamp(40px,11vw,60px)">Política de<br>privacidade</h1><p class="muted">Esta política explica quais dados o Do 0 aos 5 km coleta, por que coleta, com quem compartilha e como você pode exercer seus direitos, de acordo com a Lei Geral de Proteção de Dados (Lei nº 13.709/2018, LGPD).</p></div>'+
  sec('1. Quem é responsável pelos seus dados','<p>O Do 0 aos 5 km é um projeto da Letz Assessoria de Corrida, conduzido por Erik Martins e Uriel Pessoa, que decidem como seus dados são usados. Para qualquer assunto sobre seus dados, inclusive pedidos com base na LGPD, use o canal '+MAIL+'.</p>')+
- sec('2. Quais dados coletamos',ul(['<b>Dados da compra:</b> nome, e-mail, CPF e celular informados no cadastro e a situação do pedido (aprovado, reembolsado).','<b>Acesso:</b> e-mail e senha da sua conta e o registro de quando você entrou.','<b>Perfil:</b> nome, @ e, se você quiser, uma foto.','<b>Uso do app:</b> treinos marcados, pontos, comentários, fotos de treino e reações que você publica.','<b>Entrega da medalha:</b> nome de quem recebe, endereço com CEP e, se você informar, celular.','<b>Pagamentos:</b> a compra do projeto é processada pelo Asaas (Pix e cartão) e o frete por Pix. Recebemos apenas a confirmação do pagamento; não guardamos dados de cartão nem dados bancários.'])+
+ sec('2. Quais dados coletamos',ul(['<b>Dados da compra:</b> nome, e-mail, CPF, celular e endereço informados no cadastro e a situação do pedido (aprovado, reembolsado). Enviamos esses dados ao Asaas para o pagamento abrir já preenchido, e usamos o CPF para identificar quem comprou e evitar compra em duplicidade.','<b>Acesso:</b> e-mail e senha da sua conta e o registro de quando você entrou.','<b>Perfil:</b> nome, @ e, se você quiser, uma foto.','<b>Uso do app:</b> treinos marcados, pontos, comentários, fotos de treino e reações que você publica.','<b>Entrega da medalha:</b> nome de quem recebe, endereço com CEP e, se você informar, celular.','<b>Pagamentos:</b> a compra do projeto é processada pelo Asaas (Pix e cartão) e o frete por Pix. Recebemos apenas a confirmação do pagamento; não guardamos dados de cartão nem dados bancários.'])+
   '<p>Não pedimos dados de saúde no app. Se você contar algo sobre a sua saúde aos professores, por mensagem ou no grupo, essa informação é usada só para orientar o seu treino e não é publicada no app.</p>')+
  sec('3. Para que usamos e com qual base legal',ul(['<b>Liberar e manter seu acesso, mostrar seus treinos e enviar a medalha:</b> para cumprir o contrato da compra (LGPD, art. 7º, V).','<b>Publicar sua foto, seus comentários e suas fotos de treino no feed:</b> com o seu consentimento, que você dá ao publicar e pode retirar apagando o conteúdo (art. 7º, I).','<b>Tirar dúvidas, acompanhar seu progresso e falar com você sobre o projeto:</b> por legítimo interesse, sempre ligado ao serviço que você contratou (art. 7º, IX).','<b>Guardar registros de compra e pagamento:</b> para cumprir obrigações legais e fiscais (art. 7º, II).']))+
  sec('4. O que a turma vê','<p>Seu @, sua foto de perfil, os treinos que você marca, sua posição no ranking, seus comentários, suas fotos de treino e suas reações ficam visíveis para os outros alunos do projeto. Seu e-mail, seu endereço e seu celular nunca aparecem no app para a turma.</p><p>No grupo de WhatsApp da turma, os outros participantes veem o seu número de telefone e o nome do seu perfil no WhatsApp, como em qualquer grupo. Entrar no grupo é opcional.</p>')+
- sec('5. Com quem compartilhamos',ul(['<b>Asaas</b>, que processa os pagamentos (Pix e cartão).','<b>Serviço de pagamento do Pix</b>, que gera a cobrança e confirma o pagamento do frete.','<b>Correios ou transportadora</b>, que recebem nome, endereço e, se informado, celular para entregar a medalha.','<b>Serviços de hospedagem, armazenamento de imagens e envio de e-mail</b>, que guardam os dados e enviam e-mails em nosso nome.','<b>Autoridades públicas</b>, apenas quando a lei exigir.'])+'<p>Alguns desses serviços podem guardar dados em servidores fora do Brasil. Quando isso acontecer, usamos fornecedores que oferecem proteção adequada, como pede a LGPD. Não vendemos nem alugamos seus dados.</p>')+
- sec('6. Por quanto tempo guardamos',ul(['<b>Conta, treinos e publicações:</b> enquanto você tiver acesso ao app, ou até você pedir a exclusão.','<b>Endereço de entrega:</b> até a medalha ser entregue e por mais 90 dias, para resolver problemas com o envio.','<b>Registros de compra e pagamento:</b> pelo prazo exigido pela legislação fiscal.']))+
+ sec('5. Com quem compartilhamos',ul(['<b>Asaas</b>, que processa os pagamentos (Pix e cartão) e recebe seu nome, CPF, e-mail, celular e endereço para preencher o pagamento.','<b>Serviço de pagamento do Pix</b>, que gera a cobrança e confirma o pagamento do frete.','<b>Correios ou transportadora</b>, que recebem nome, endereço e, se informado, celular para entregar a medalha.','<b>Serviços de hospedagem, armazenamento de imagens e envio de e-mail</b>, que guardam os dados e enviam e-mails em nosso nome.','<b>Autoridades públicas</b>, apenas quando a lei exigir.'])+'<p>Alguns desses serviços podem guardar dados em servidores fora do Brasil. Quando isso acontecer, usamos fornecedores que oferecem proteção adequada, como pede a LGPD. Não vendemos nem alugamos seus dados.</p>')+
+ sec('6. Por quanto tempo guardamos',ul(['<b>Conta, treinos e publicações:</b> enquanto você tiver acesso ao app, ou até você pedir a exclusão.','<b>Endereço do cadastro:</b> enquanto você tiver acesso ao app. <b>Endereço de entrega da medalha:</b> até a medalha ser entregue e por mais 90 dias, para resolver problemas com o envio.','<b>Registros de compra e pagamento:</b> pelo prazo exigido pela legislação fiscal.']))+
  sec('7. Como protegemos','<p>O acesso ao app é feito com e-mail e senha, a conexão é criptografada (https) e só os professores acessam a área administrativa. Nenhum sistema é totalmente imune a falhas. Se acontecer um incidente que possa trazer risco a você, avisamos você e a Autoridade Nacional de Proteção de Dados (ANPD), como determina a lei.</p>')+
  sec('8. Seus direitos','<p>Você pode, a qualquer momento e sem custo:</p>'+ul(['confirmar se tratamos seus dados e ter acesso a eles;','corrigir dados incompletos ou errados;','pedir a exclusão, o bloqueio ou a anonimização de dados desnecessários;','receber seus dados para levar a outro serviço;','saber com quem compartilhamos seus dados;','retirar o consentimento, por exemplo apagando sua foto ou suas publicações.'])+'<p>Para isso, escreva para '+MAIL+'. Respondemos em até 15 dias. Você também pode reclamar à ANPD pelo site gov.br/anpd.</p>')+
  sec('9. Dados guardados no seu celular','<p>O app guarda no seu aparelho algumas informações para funcionar, como a sua sessão de acesso e as preferências de tela. Não usamos cookies de publicidade nem ferramentas que rastreiam você em outros sites.</p>')+
@@ -3243,6 +3255,13 @@ function lookupCep(c){var msg=document.getElementById('cep-msg');var set=functio
   var map={rua:j.logradouro,bairro:j.bairro,cidade:j.localidade,uf:j.uf};for(var k in map){if(map[k]){V.sd[k]=map[k];var el=document.getElementById('sh-'+k);if(el)el.value=map[k];}}
   set('Endereço encontrado. Confira e coloque o número.');var n=document.getElementById('sh-num');if(n)n.focus();}).catch(function(){set('Não deu para buscar o CEP agora. Preencha o endereço à mão.');});}
 
+function lookupSgCep(c){var g=V.sg,msg=document.getElementById('sg-cep-msg'),say=function(t){g.cepMsg=t;if(msg)msg.textContent=t;},
+ reveal=function(manual){g.addrOpen=true;g.addrManual=manual;var y=window.scrollY;render();window.scrollTo(0,y);var n=document.getElementById(manual?'sg-street':'sg-number');if(n)n.focus({preventScroll:true});};
+ say('Buscando o endereço…');
+ fetch('https://viacep.com.br/ws/'+c+'/json/').then(function(r){return r.json();}).then(function(j){if(V.sg!==g||g.lastCep!==c)return;
+  if(j.erro){say('CEP não encontrado. Preencha o endereço abaixo.');reveal(true);return;}
+  g.street=j.logradouro||'';g.district=j.bairro||'';g.city=j.localidade||'';g.uf=j.uf||'';
+  say('Endereço encontrado. Falta só o número.');reveal(!(g.street&&g.district&&g.city&&g.uf));}).catch(function(){if(V.sg!==g||g.lastCep!==c)return;say('Não deu para buscar o CEP agora. Preencha o endereço abaixo.');reveal(true);});}
 function vAthlete(){var labels={treinos:['run','Treinos'],feed:['feed','Feed'],ranking:['rank','Ranking'],videos:['play','Vídeos']};
  var body=V.tab==='treinos'?header('Do 0 aos 5 km')+vTreinos():V.tab==='feed'?vFeed():V.tab==='ranking'?vRanking():V.tab==='videos'?vVideos():vFim();
  return '<div class="view">'+body+'</div>'+vSheet()+vShip()+
@@ -3396,12 +3415,15 @@ app.addEventListener('submit',function(e){e.preventDefault();
   else if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em))V.serr='Informe um e-mail válido.';
   else if(!LetzCore.isValidCpf(g.cpf||''))V.serr='CPF inválido. Confira os números.';
   else if(!LetzCore.normalizePhone(g.phone||''))V.serr='Informe um celular com DDD.';
+  else if(!/^\d{8}$/.test((g.cep||'').replace(/\D/g,'')))V.serr='Informe o CEP do seu endereço.';
+  else if(!g.addrOpen||!(g.street||'').trim()||!(g.district||'').trim()||!(g.city||'').trim()||!/^[A-Z]{2}$/.test(g.uf||''))V.serr='Confira o endereço: rua, bairro, cidade e estado.';
+  else if(!(g.number||'').trim())V.serr='Informe o número do endereço (ou S/N).';
   else if((g.pass||'').length<6)V.serr='A senha precisa ter pelo menos 6 caracteres.';
   else if(g.pass!==g.pass2)V.serr='As duas senhas não são iguais.';
   else if(!g.accept)V.serr='Para continuar, aceite a política de privacidade.';
   else if(!window.LetzFB)V.serr='Sem conexão com o servidor. Confira sua internet e tente de novo.';
   else{V.serr='';V.busy=true;V.signingUp=true;
-   LetzFB.signup({name:nm,email:em,password:g.pass,cpf:g.cpf,phone:g.phone,acceptPolicy:true}).then(function(r){V.sg={};location.assign(r.checkoutUrl);},
+   LetzFB.signup({name:nm,email:em,password:g.pass,cpf:g.cpf,phone:g.phone,address:{cep:g.cep,street:g.street.trim(),number:g.number.trim(),complement:(g.complement||'').trim(),district:g.district.trim(),city:g.city.trim(),uf:g.uf},acceptPolicy:true}).then(function(r){V.sg={};location.assign(r.checkoutUrl);},
     function(er){V.signingUp=false;V.busy=false;var m=LetzFB.errorMessage(er);if(er&&er.code==='functions/failed-precondition'&&/vendas/i.test(String(er.message||'')))m='As vendas estão encerradas.';if(er&&er.signedIn){V.sg={};reroute(m);}else{V.serr=m;render();}});}
   render();return;}
  if(e.target.id==='f-forgot'){var fe=document.getElementById('in-femail').value.trim();V.femail=fe;
@@ -3423,6 +3445,7 @@ app.addEventListener('input',function(e){var id=e.target.id,ga=function(n){retur
  if(id==='fin-q'){V.fq=e.target.value;softRender();return;}
  if(id==='in-start')V.dstart=e.target.value;
  if(id==='sg-cpf'||id==='sg-phone'||id==='sh-tel'){var mv=id==='sg-cpf'?fmtCpf(e.target.value):fmtPhone(e.target.value);if(mv!==e.target.value)e.target.value=mv;}
+ if(id==='sg-cep'){var sv=fmtCep(e.target.value);if(sv!==e.target.value)e.target.value=sv;var s8=sv.replace(/\D/g,'');if(s8.length===8&&s8!==V.sg.lastCep){V.sg.lastCep=s8;lookupSgCep(s8);}else if(s8.length<8&&V.sg.lastCep){V.sg.lastCep='';}}
  if(id&&id.indexOf('sg-')===0){V.sg[id.slice(3)]=e.target.type==='checkbox'?e.target.checked:e.target.value;}
  if(id&&id.indexOf('sh-')===0){if(id==='sh-cep'){var fv=fmtCep(e.target.value);if(fv!==e.target.value)e.target.value=fv;var c8=fv.replace(/\D/g,'');if(c8.length===8&&c8!==V.lastCep){V.lastCep=c8;lookupCep(c8);}}V.sd[id.slice(3)]=e.target.value;}
  if(id&&id.indexOf('c-')===0){V.ctext[id.slice(2)]=e.target.value;}
@@ -3431,6 +3454,7 @@ app.addEventListener('input',function(e){var id=e.target.id,ga=function(n){retur
  if(id==='in-handle'||id==='in-pname'){grab();var ph=document.getElementById('pv-handle'),pi=document.getElementById('pv-ini');if(ph)ph.textContent='@'+(V.draft.handle||'seu.instagram');if(pi)pi.textContent=initials(V.draft.name||V.draft.handle||'?');}});
 app.addEventListener('change',function(e){var t=e.target;
  if(t.id==='sh-uf'){V.sd.uf=t.value;return;}
+ if(t.id==='sg-uf'){V.sg.uf=t.value;return;}
  if(t.id==='cfg-sales'){S.salesOpen=t.checked;cfgSave({salesOpen:t.checked});return;}
  if(t.id==='fr-frete'){var fv2=parseFloat(t.value.replace(/\./g,'').replace(',','.'));S.cfg.frete=isNaN(fv2)||fv2<=0?0:Math.round(fv2*100)/100;cfgSave({frete:S.cfg.frete});var yf=window.scrollY;render();window.scrollTo(0,yf);return;}
  if(t.id==='fr-chave'||t.id==='fr-pnome'||t.id==='fr-pcidade'){S.cfg[t.id.slice(3)]=t.value.trim();var pxo={};pxo[t.id.slice(3)]=S.cfg[t.id.slice(3)];cfgSave({pix:pxo});return;}
@@ -3488,6 +3512,7 @@ app.addEventListener('click',function(e){var b=e.target.closest('[data-act]');if
   else if(!V.cbusy[k]){var cp=k.split('-');V.cbusy[k]=true;V.cerr[k]='';
    dataToBlob(ph).then(function(bl){return LetzFB.setWorkoutContent(+cp[0],+cp[1],{comment:tx,photoBlob:bl});}).then(function(){delete V.pending[k];delete V.ctext[k];V.cbusy[k]=false;softRender();},function(er){V.cbusy[k]=false;V.cerr[k]=LetzFB.errorMessage(er);softRender();});}}
  else if(a==='ph-open'){V.sheet=k;}
+ else if(a==='sg-addr-edit'){V.sg.addrManual=true;var y2=window.scrollY;render();window.scrollTo(0,y2);var n2=document.getElementById('sg-street');if(n2)n2.focus({preventScroll:true});}
  else if(a==='ship-open'){V.shipStep='addr';V.shipOpen=true;V.sd=S.ship?JSON.parse(JSON.stringify(S.ship)):{nome:S.name};V.cepMsg='';V.shipErr='';V.lastCep='';}
  else if(a==='ship-close'){V.shipOpen=false;}
  else if(a==='pay-open'){V.shipOpen=true;V.shipStep='pay';V.copied=false;}
