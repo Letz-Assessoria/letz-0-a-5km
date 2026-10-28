@@ -6,7 +6,8 @@ Fontes: revisão final do PR #2, revisão da Task 12, revisões de segurança au
 
 ## 1. Antes ou logo depois da abertura da turma
 
-- [ ] **Teste de fumaça com pagamento real.** Cadastro com CPF válido, pagamento (Pix ou cartão), `#/confirmando` virar o app, evento em `asaasEvents` e linha em `payments`, estorno no Asaas e conta "Bloqueado". Passos em `docs/lancamento.md`, seção 13.
+- [x] **Teste de fumaça com pagamento real** feito em 28/10/2026 (Pix R$ 5,00, cadastro, login e acesso OK; reembolso parcial não bloqueia, de propósito). Falta o estorno total e o cartão.
+- [ ] (antigo) Teste de fumaça com pagamento real. Cadastro com CPF válido, pagamento (Pix ou cartão), `#/confirmando` virar o app, evento em `asaasEvents` e linha em `payments`, estorno no Asaas e conta "Bloqueado". Passos em `docs/lancamento.md`, seção 13.
 - [ ] **Confirmar o IP do cliente (XFF) nos logs** depois do primeiro cadastro: o limite de cadastro por IP usa o último salto de `X-Forwarded-For` (`functions/src/signup.js`). Se o IP gravado for o do proxy, o limite trata todos como um só.
 - [ ] **Link do grupo de WhatsApp.** Revogar o convite antigo (continua no histórico do git) e colocar o novo no painel, em Conteúdo.
 - [ ] **Chave do Asaas sandbox** colada no chat durante os testes: revogar.
@@ -23,7 +24,8 @@ Fontes: revisão final do PR #2, revisão da Task 12, revisões de segurança au
 - [ ] **Checkout duplicado.** Pago no checkout A enquanto `billing.checkoutId` é B: cancelar B depois da transação (`cancelCheckoutQuietly`) (M2).
 - [ ] **"Ainda não paguei" em `#/confirmando`.** Não substituir um checkout com menos de 60 minutos; janela pequena de pagamento duplicado nos 5 últimos minutos (M3). O flag `duplicate` já cobre.
 - [ ] **Falha isolada de `payments`.** Hoje um erro ao montar a linha só vai para o log. Se quiser mais garantia, escrever fora da transação e testar uma falha forçada.
-- [ ] **Estorno parcial e chargeback ganho** não são tratados sozinhos (M16). O treinador usa "Liberar acesso". Documentar para o treinador.
+- [x] **Reembolso parcial:** gera alerta no painel (`partial-refund`), sem bloquear (PR #7). Falta confirmar o corpo real do evento `PAYMENT_PARTIALLY_REFUNDED` num reembolso parcial feito depois da assinatura.
+- [ ] **Chargeback ganho** (reversão) não é tratado sozinho (M16). O treinador usa "Liberar acesso". Documentar para o treinador.
 
 ## 3. Painel do treinador
 
