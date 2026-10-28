@@ -16,6 +16,11 @@ const MSG_SALES_CLOSED = 'As vendas desta turma estão fechadas.';
 const MSG_RATE = 'Muitas tentativas. Tente de novo em alguns minutos.';
 const MSG_PAID = 'O pagamento já foi feito.';
 const MSG_CLOSED = 'Este cadastro foi encerrado. Fale com a Letz.';
+const MSG_NO_REBUY = 'Não foi possível comprar de novo. Fale com a assessoria no WhatsApp.';
+// Pode comprar de novo enquanto refundCount < 2 (uma recompra por produto).
+const REFUND_LIMIT = 2;
+// Estados do programa em que a conta voltou a ficar fechada e pode ser recomprada.
+const REBUYABLE = ['refunded', 'chargeback', 'rejected'];
 // Uma só mensagem para cupom inexistente, inativo, vencido ou esgotado: não revela qual.
 const MSG_COUPON = 'Cupom inválido ou esgotado.';
 const COUPON_RE = /^[A-Z0-9]{4,20}$/;
@@ -309,13 +314,15 @@ async function cleanupAmbiguousCreate(db, uid, email) {
 
 // Abre um checkout no Asaas e grava checkouts/{id} e o billing, se ainda pendente.
 // Se o billing deixou de estar pendente (pagamento chegou no meio), cancela o novo checkout.
-async function openCheckout(db, uid) {
+// rebuy: recompra de conta reembolsada. Preço cheio (sem cupom) e, na mesma transação, o
+// billing volta a "pending" (refundCount < 2); o acesso segue bloqueado até o webhook.
+async function openCheckout(db, uid, { rebuy = false } = {}) {
   const [userDoc, profileDoc, billingDoc] = await Promise.all([
     db.doc('users/' + uid).get(), db.doc(`users/${uid}/private/profile`).get(), db.doc(`users/${uid}/private/billing`).get(),
   ]);
   const customerData = customerDataOf(userDoc.get('name'), profileDoc.exists ? profileDoc.data() : null);
   // Conta com cupom: o valor com desconto foi fixado no cadastro e é o mesmo em toda reabertura.
-  const coupon = billingDoc.exists ? billingDoc.get('coupon') || null : null;
+  const coupon = !rebuy && billingDoc.exists ? billingDoc.get('coupon') || null : null;
   const percent = coupon ? billingDoc.get('percent') : null;
   const value = coupon ? billingDoc.get('value') : undefined;
   const checkout = await asaasClient().createCheckout(checkoutArgs(uid, customerData, value));
@@ -324,17 +331,27 @@ async function openCheckout(db, uid) {
   const saved = await db.runTransaction(async (tx) => {
     const billing = await tx.get(billingRef);
     const gone = billing.exists && cpfGone(billing.data());
-    const ok = billing.exists && billing.get('status') === 'pending' && !gone;
+    const status = billing.exists ? billing.get('status') : null;
+    const limit = rebuy && billing.exists && (billing.get('refundCount') || 0) >= REFUND_LIMIT;
+    const open = rebuy ? REBUYABLE.includes(status) || (status === 'pending' && !!billing.get('rebuyAt')) : status === 'pending';
+    const ok = open && !gone && !limit;
     tx.set(db.doc('checkouts/' + checkout.id), {
       uid, createdAt: FieldValue.serverTimestamp(), expiresAt, status: ok ? 'active' : 'canceled',
       ...(coupon ? { coupon, percent, value } : {}),
     });
     if (ok) {
-      tx.update(billingRef, {
-        checkoutId: checkout.id, url: checkout.url, expiresAt, updatedAt: FieldValue.serverTimestamp(),
-      });
+      const upd = { checkoutId: checkout.id, url: checkout.url, expiresAt, updatedAt: FieldValue.serverTimestamp() };
+      if (rebuy) {
+        const del = FieldValue.delete();
+        Object.assign(upd, {
+          status: 'pending', rebuyAt: FieldValue.serverTimestamp(),
+          coupon: del, percent: del, value: del, paidAt: del, paymentId: del, method: del, installments: del,
+          duplicate: del, refundRequestedAt: del,
+        });
+      }
+      tx.update(billingRef, upd);
     }
-    return ok ? 'ok' : (gone ? 'closed' : 'paid');
+    return ok ? 'ok' : (gone ? 'closed' : (limit ? 'limit' : 'paid'));
   });
   if (saved !== 'ok') {
     try {
@@ -342,6 +359,7 @@ async function openCheckout(db, uid) {
     } catch (err) {
       logger.error('openCheckout: não cancelou o checkout aberto em corrida com o pagamento', { uid, checkoutId: checkout.id, err: safeErr(err) });
     }
+    if (saved === 'limit') throw new HttpsError('failed-precondition', MSG_NO_REBUY);
     throw new HttpsError('failed-precondition', saved === 'closed' ? MSG_CLOSED : MSG_PAID);
   }
   return checkout.url;
@@ -483,4 +501,37 @@ async function resumeCheckout(request) {
   }
 }
 
-module.exports = { signup, resumeCheckout, validate, MSG_EXISTS };
+// Recompra do programa: conta reembolsada (ou estornada/reprovada) paga de novo, uma vez.
+// Tudo conferido aqui; o app só esconde o botão. O acesso continua "blocked" até o webhook.
+async function rebuyProgram(request) {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Entre com seu e-mail e senha.');
+  const uid = request.auth.uid;
+  const db = getFirestore();
+  const [user, billingSnap] = await Promise.all([
+    db.doc('users/' + uid).get(),
+    db.doc(`users/${uid}/private/billing`).get(),
+  ]);
+  const billing = billingSnap.exists ? billingSnap.data() : null;
+  const reopened = !!billing && billing.status === 'pending' && !!billing.rebuyAt;
+  if (!user.exists || !billing || !(REBUYABLE.includes(billing.status) || reopened)) {
+    throw new HttpsError('failed-precondition', MSG_NO_REBUY);
+  }
+  if (cpfGone(billing)) throw new HttpsError('failed-precondition', MSG_CLOSED);
+  if ((billing.refundCount || 0) >= REFUND_LIMIT) throw new HttpsError('failed-precondition', MSG_NO_REBUY);
+
+  if (reopened) {
+    if (billing.url && billing.expiresAt && billing.expiresAt.toMillis() - REUSE_MARGIN_MS > Date.now()) {
+      return { checkoutUrl: billing.url };
+    }
+    await cancelCheckoutQuietly(db, billing.checkoutId, 'rebuyProgram');
+  }
+  try {
+    return { checkoutUrl: await openCheckout(db, uid, { rebuy: true }) };
+  } catch (err) {
+    if (err instanceof HttpsError) throw err;
+    logger.error('rebuyProgram: Asaas falhou ao criar o checkout', { uid, status: err && err.status, err: safeErr(err) });
+    throw new HttpsError('unavailable', 'Não conseguimos abrir o pagamento agora. Tente de novo em instantes.');
+  }
+}
+
+module.exports = { signup, resumeCheckout, rebuyProgram, REFUND_LIMIT, validate, MSG_EXISTS };

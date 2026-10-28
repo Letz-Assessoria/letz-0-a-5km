@@ -9,13 +9,13 @@ const { asaasClient, medalCheckoutArgs, customerDataOf, MEDAL_PRICE } = require(
 const { safeErr } = require('./safe.js');
 const { marksFromPosts } = require('./points.js');
 const { sendMail } = require('./mailer.js');
+const { REFUND_LIMIT } = require('./signup.js');
 
 const MSG_ADDRESS = 'Confira o endereço: CEP, rua, número, bairro, cidade e estado.';
 const MSG_NOT_ELIGIBLE = 'A medalha é para quem concluiu o programa.';
 const MSG_TAKEN = 'A medalha já foi paga.';
 const MSG_LIMIT = 'Não foi possível comprar a medalha. Fale com a assessoria no WhatsApp.';
 const MSG_UNAVAILABLE = 'Não conseguimos abrir o pagamento agora. Tente de novo em instantes.';
-const REFUND_LIMIT = 2; // pode comprar enquanto refundCount < 2
 // O checkout salvo só é reaproveitado se ainda tiver esta folga até vencer.
 const REUSE_MARGIN_MS = 5 * 60000;
 const PAID = ['paid', 'shipped', 'delivered'];
@@ -225,4 +225,34 @@ async function resendMedalEmail(request) {
   return { ok: true, emailed: await emailShipped(db, uid, order) };
 }
 
-module.exports = { startMedalCheckout, updateMedalOrder, resendMedalEmail };
+// ---- Pedido de reembolso (aluno): só registra; o reembolso em si é manual no Asaas ----
+const REFUND_WINDOW_MS = 7 * 864e5;
+const MSG_REFUND_PROGRAM = 'O prazo de 7 dias para pedir reembolso do programa acabou. Fale com a assessoria no WhatsApp.';
+const MSG_REFUND_MEDAL = 'Só dá para pedir reembolso da medalha antes do envio. Fale com a assessoria no WhatsApp.';
+// Dia no horário de Brasília (AAAA-MM-DD): o pedido se renova uma vez por dia.
+const dayOf = (ms) => new Date(ms - 3 * 3600e3).toISOString().slice(0, 10);
+
+async function requestRefund(request) {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Entre com seu e-mail e senha.');
+  const uid = request.auth.uid;
+  const product = request.data && typeof request.data === 'object' ? request.data.product : null;
+  if (product !== 'program' && product !== 'medal') throw bad('Produto inválido.');
+  const ref = getFirestore().doc(`users/${uid}/private/${product === 'program' ? 'billing' : 'medal'}`);
+  await getFirestore().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const cur = snap.exists ? snap.data() : null;
+    if (product === 'program') {
+      const paidAt = cur && cur.paidAt && typeof cur.paidAt.toMillis === 'function' ? cur.paidAt.toMillis() : null;
+      if (!cur || cur.status !== 'paid' || paidAt === null) throw new HttpsError('failed-precondition', 'Não há pagamento do programa para reembolsar.');
+      if (Date.now() - paidAt > REFUND_WINDOW_MS) throw new HttpsError('failed-precondition', MSG_REFUND_PROGRAM);
+    } else if (!cur || cur.status !== 'paid') {
+      throw new HttpsError('failed-precondition', MSG_REFUND_MEDAL);
+    }
+    const last = cur.refundRequestedAt && cur.refundRequestedAt.toMillis();
+    if (last && dayOf(last) === dayOf(Date.now())) return; // já pediu hoje
+    tx.update(ref, { refundRequestedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+  });
+  return { ok: true };
+}
+
+module.exports = { startMedalCheckout, requestRefund, updateMedalOrder, resendMedalEmail };

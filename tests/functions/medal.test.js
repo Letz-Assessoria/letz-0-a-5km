@@ -456,6 +456,164 @@ describe('medalha: envio (updateMedalOrder, resendMedalEmail)', () => {
   });
 });
 
+describe('reembolso e recompra', () => {
+  before(async () => {
+    fake = await startFakeAsaas({ port: 7777 });
+  });
+  beforeEach(wipe);
+  after(async () => {
+    await wipe();
+    await fake.close();
+  });
+
+  const daysAgo = (n) => admin.firestore.Timestamp.fromMillis(Date.now() - n * 864e5);
+  // Conta com o programa pago há `days` dias (billing e acesso semeados direto).
+  async function paidProgram(days, extra = {}) {
+    const s = await signupOk(person());
+    await db.doc('users/' + s.uid).update({ access: 'active' });
+    await db.doc(`users/${s.uid}/private/billing`).update({ status: 'paid', paidAt: daysAgo(days), ...extra });
+    s.token = await signIn(s.p.email, s.p.password);
+    return s;
+  }
+  const billingOf = (uid) => get(`users/${uid}/private/billing`);
+
+  describe('requestRefund', () => {
+    it('programa pago há 3 dias: ok e grava refundRequestedAt; repetir no mesmo dia não regrava', async () => {
+      const s = await paidProgram(3);
+      const r = await call('requestRefund', { product: 'program' }, s.token);
+      assert.deepEqual(r.result, { ok: true });
+      const first = (await billingOf(s.uid)).refundRequestedAt;
+      assert.ok(first);
+      assert.deepEqual((await call('requestRefund', { product: 'program' }, s.token)).result, { ok: true });
+      assert.equal((await billingOf(s.uid)).refundRequestedAt.toMillis(), first.toMillis());
+    });
+
+    it('pedido de um dia anterior é renovado', async () => {
+      const s = await paidProgram(3, { refundRequestedAt: daysAgo(1) });
+      assert.deepEqual((await call('requestRefund', { product: 'program' }, s.token)).result, { ok: true });
+      assert.ok((await billingOf(s.uid)).refundRequestedAt.toMillis() > Date.now() - 60000);
+    });
+
+    it('programa pago há 8 dias: failed-precondition e nada gravado', async () => {
+      const s = await paidProgram(8);
+      const r = await call('requestRefund', { product: 'program' }, s.token);
+      assert.equal(r.error.status, 'FAILED_PRECONDITION');
+      assert.equal((await billingOf(s.uid)).refundRequestedAt, undefined);
+    });
+
+    it('sem pagamento, sem login ou produto inválido: recusado', async () => {
+      const s = await signupOk(person());
+      const token = await signIn(s.p.email, s.p.password);
+      assert.equal((await call('requestRefund', { product: 'program' }, token)).error.status, 'FAILED_PRECONDITION');
+      assert.equal((await call('requestRefund', { product: 'medal' }, token)).error.status, 'FAILED_PRECONDITION');
+      assert.equal((await call('requestRefund', { product: 'x' }, token)).error.status, 'INVALID_ARGUMENT');
+      assert.equal((await call('requestRefund', { product: 'program' })).error.status, 'UNAUTHENTICATED');
+    });
+
+    it('medalha paid: ok e grava no pedido; shipped, delivered e pending: recusado', async () => {
+      const s = await concluded();
+      const ref = db.doc(`users/${s.uid}/private/medal`);
+      await ref.set({ status: 'paid', refundCount: 0 });
+      assert.deepEqual((await call('requestRefund', { product: 'medal' }, s.token)).result, { ok: true });
+      assert.ok((await ref.get()).get('refundRequestedAt'));
+      for (const status of ['shipped', 'delivered', 'pending']) {
+        await ref.update({ status, refundRequestedAt: admin.firestore.FieldValue.delete() });
+        const r = await call('requestRefund', { product: 'medal' }, s.token);
+        assert.equal(r.error.status, 'FAILED_PRECONDITION', status);
+        assert.equal((await ref.get()).get('refundRequestedAt'), undefined);
+      }
+    });
+  });
+
+  describe('rebuyProgram', () => {
+    // Paga pelo webhook e estorna: conta bloqueada com refundCount 1.
+    async function refunded() {
+      const p = person();
+      assert.equal((await call('signup', p)).error, undefined);
+      const uid = (await admin.auth().getUserByEmail(p.email)).uid;
+      const checkoutId = (await billingOf(uid)).checkoutId;
+      await hook(checkoutPaid(uid, checkoutId));
+      await hook(payment('cardRefunded', checkoutId));
+      return { p, uid, oldCheckout: checkoutId, token: await signIn(p.email, p.password) };
+    }
+
+    it('após reembolso (refundCount 1): checkout novo, billing pending, acesso segue blocked até o webhook', async () => {
+      const s = await refunded();
+      assert.equal((await get('users/' + s.uid)).access, 'blocked');
+      const r = await call('rebuyProgram', {}, s.token);
+      assert.equal(r.error, undefined, JSON.stringify(r.error));
+      assert.match(r.result.checkoutUrl, /^http:\/\/127\.0\.0\.1:7777\/checkoutSession\/show\//);
+      const b = await billingOf(s.uid);
+      assert.equal(b.status, 'pending');
+      assert.equal(b.refundCount, 1);
+      assert.notEqual(b.checkoutId, s.oldCheckout);
+      assert.equal(b.url, r.result.checkoutUrl);
+      assert.equal((await get('users/' + s.uid)).access, 'blocked');
+      assert.equal((await get('checkouts/' + b.checkoutId)).status, 'active');
+      // pago o novo checkout, o acesso volta
+      await hook(checkoutPaid(s.uid, b.checkoutId));
+      assert.equal((await get('users/' + s.uid)).access, 'active');
+      assert.equal((await billingOf(s.uid)).status, 'paid');
+    });
+
+    it('repetir enquanto o checkout vale devolve o mesmo, sem abrir outro', async () => {
+      const s = await refunded();
+      const a = await call('rebuyProgram', {}, s.token);
+      const n = (await sentCheckouts()).length;
+      const b = await call('rebuyProgram', {}, s.token);
+      assert.equal(b.result.checkoutUrl, a.result.checkoutUrl);
+      assert.equal((await sentCheckouts()).length, n);
+    });
+
+    it('conta com cupom recompra pelo preço cheio, sem cupom', async () => {
+      const s = await refunded();
+      await db.doc(`users/${s.uid}/private/billing`).update({ coupon: 'AMIGO10', percent: 10, value: 89.1 });
+      assert.equal((await call('rebuyProgram', {}, s.token)).error, undefined);
+      const b = await billingOf(s.uid);
+      assert.equal(b.coupon, undefined);
+      assert.equal(b.value, undefined);
+      const sent = await sentCheckouts();
+      assert.equal(sent[sent.length - 1].items[0].value, 159);
+    });
+
+    it('refundCount 2: recusado e nenhum checkout novo', async () => {
+      const s = await refunded();
+      await db.doc(`users/${s.uid}/private/billing`).update({ refundCount: 2 });
+      const n = (await sentCheckouts()).length;
+      const r = await call('rebuyProgram', {}, s.token);
+      assert.equal(r.error.status, 'FAILED_PRECONDITION');
+      assert.equal((await sentCheckouts()).length, n);
+      assert.equal((await billingOf(s.uid)).status, 'refunded');
+    });
+
+    it('conta nunca reembolsada (pending ou paga): recusado, sem checkout', async () => {
+      const pend = await signupOk(person());
+      const pendToken = await signIn(pend.p.email, pend.p.password);
+      const paid = await paidProgram(2);
+      const n = (await sentCheckouts()).length;
+      assert.equal((await call('rebuyProgram', {}, pendToken)).error.status, 'FAILED_PRECONDITION');
+      assert.equal((await call('rebuyProgram', {}, paid.token)).error.status, 'FAILED_PRECONDITION');
+      assert.equal((await call('rebuyProgram', {})).error.status, 'UNAUTHENTICATED');
+      assert.equal((await sentCheckouts()).length, n);
+      assert.equal((await billingOf(paid.uid)).status, 'paid');
+    });
+
+    it('rejected e chargeback também recompram; Asaas fora do ar mantém a conta fechada', async () => {
+      for (const status of ['chargeback', 'rejected']) {
+        const s = await refunded();
+        await db.doc(`users/${s.uid}/private/billing`).update({ status });
+        assert.equal((await call('rebuyProgram', {}, s.token)).error, undefined, status);
+      }
+      const s = await refunded();
+      await fetch(`${fake.url}/__fail`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ checkouts: true }) });
+      const r = await call('rebuyProgram', {}, s.token);
+      assert.equal(r.error.status, 'UNAVAILABLE');
+      assert.equal((await billingOf(s.uid)).status, 'refunded');
+      assert.equal((await get('users/' + s.uid)).access, 'blocked');
+    });
+  });
+});
+
 describe('mailer', () => {
   const mailer = () => require('./src/mailer.js');
   const withEnv = async (value, fn) => {
