@@ -166,8 +166,8 @@ async function processEvent(db, body) {
       at: FieldValue.serverTimestamp(),
     });
     // Pago e não aplicado (ou que precisa do olho do treinador): alerta no painel.
-    const alert = (type) => tx.create(db.collection('alerts').doc(), {
-      type, uid: uid || null, checkoutId: ev.checkoutId || null, eventId, at: FieldValue.serverTimestamp(), resolved: false,
+    const alert = (type, extra = {}) => tx.create(db.collection('alerts').doc(), {
+      type, uid: uid || null, checkoutId: ev.checkoutId || null, eventId, at: FieldValue.serverTimestamp(), resolved: false, ...extra,
     });
     if (ev.kind === 'ignore') return { result: 'ignorado' };
     if (!uid || !userSnap.exists || !billingSnap.exists) {
@@ -180,6 +180,14 @@ async function processEvent(db, body) {
     }
 
     const state = { billing: billingSnap.data(), checkout };
+    if (ev.kind === 'partial-refund') {
+      // Não mexe no acesso nem no status: avisa o treinador, que decide (e vê o valor no Financeiro).
+      alert('partial-refund', { refunded: ev.refunded });
+      if (refs.payment && paySnap && paySnap.exists) {
+        tx.update(refs.payment, { refunded: ev.refunded, updatedAt: FieldValue.serverTimestamp() });
+      }
+      return { result: 'reembolso parcial: alerta', uid, mismatch };
+    }
     const result = ev.kind === 'paid' ? applyPaid(tx, refs, ev, state, alert) : applyClosed(tx, refs, ev, state);
     if (refs.payment) {
       // Linha financeira é só relatório: falha aqui nunca pode desfazer a liberação de acesso.

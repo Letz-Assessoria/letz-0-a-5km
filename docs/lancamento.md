@@ -152,7 +152,7 @@ O treinador entra com "Esqueci minha senha" se o script criou a conta. Verificar
 ## 11. Asaas (conta de produção)
 
 1. **Chave Pix cadastrada** na conta de produção (app/portal do Asaas, Pix, chaves). Sem chave, `POST /checkouts` com Pix devolve 400 e todo cadastro termina em "indisponível". Verificar com um checkout real de teste (passo 13).
-2. **Webhook de produção** por API, com `sendType` SEQUENTIALLY, o token do passo 6 e os eventos abaixo. `PAYMENT_REPROVED_BY_RISK_ANALYSIS` e `PAYMENT_CREDIT_CARD_CAPTURE_REFUSED` bloqueiam quem foi ativado pelo checkout e depois reprovado no risco.
+2. **Webhook de produção** por API, com `sendType` SEQUENTIALLY, o token do passo 6 e os eventos abaixo. `PAYMENT_PARTIALLY_REFUNDED` só gera alerta no painel (não bloqueia). `PAYMENT_REPROVED_BY_RISK_ANALYSIS` e `PAYMENT_CREDIT_CARD_CAPTURE_REFUSED` bloqueiam quem foi ativado pelo checkout e depois reprovado no risco.
 
 ```bash
 # ASAAS_API_KEY e WEBHOOK_TOKEN vêm do ambiente/cofre, nunca digitados na linha de comando salva
@@ -171,12 +171,12 @@ curl -s -X POST https://api.asaas.com/v3/webhooks \
     \"sendType\": \"SEQUENTIALLY\",
     \"events\": [\"CHECKOUT_PAID\",\"PAYMENT_CONFIRMED\",\"PAYMENT_RECEIVED\",\"PAYMENT_REFUNDED\",
                 \"PAYMENT_CHARGEBACK_REQUESTED\",\"PAYMENT_CHARGEBACK_DISPUTE\",
-                \"PAYMENT_REPROVED_BY_RISK_ANALYSIS\",\"PAYMENT_CREDIT_CARD_CAPTURE_REFUSED\"]
+                \"PAYMENT_REPROVED_BY_RISK_ANALYSIS\",\"PAYMENT_CREDIT_CARD_CAPTURE_REFUSED\",\"PAYMENT_PARTIALLY_REFUNDED\"]
   }"
 unset ASAAS_API_KEY WEBHOOK_TOKEN
 ```
 
-(esta é a URL de produção do Cloud Run; confira com `gcloud run services list`.) O e-mail de falha do webhook do Asaas cai no `email` informado. Verificar: `GET /v3/webhooks` lista o webhook com `enabled: true`, `sendType: SEQUENTIALLY` e os 8 eventos; sem `PAYMENT_DELETED`.
+(esta é a URL de produção do Cloud Run; confira com `gcloud run services list`.) O e-mail de falha do webhook do Asaas cai no `email` informado. Verificar: `GET /v3/webhooks` lista o webhook com `enabled: true`, `sendType: SEQUENTIALLY` e os 9 eventos; sem `PAYMENT_DELETED`.
 
 ## 12. Alertas
 

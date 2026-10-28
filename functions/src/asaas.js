@@ -113,13 +113,15 @@ function createClient({ baseUrl, apiKey, fetchImpl } = {}) {
 
 const PAID_PAYMENT_EVENTS = new Set(['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED']);
 const REFUND_EVENTS = new Set(['PAYMENT_REFUNDED']);
+// Reembolso parcial: a cobrança segue RECEIVED. Só vira alerta; quem decide o acesso é o treinador.
+const PARTIAL_REFUND_EVENTS = new Set(['PAYMENT_PARTIALLY_REFUNDED']);
 const CHARGEBACK_EVENTS = new Set(['PAYMENT_CHARGEBACK_REQUESTED', 'PAYMENT_CHARGEBACK_DISPUTE']);
 // Cartão reprovado pela análise de risco ou captura recusada depois do CHECKOUT_PAID.
 const REJECT_EVENTS = new Set(['PAYMENT_REPROVED_BY_RISK_ANALYSIS', 'PAYMENT_CREDIT_CARD_CAPTURE_REFUSED']);
 const METHODS = new Set(['PIX', 'CREDIT_CARD']);
 
 function ignore() {
-  return { kind: 'ignore', uid: null, checkoutId: null, paymentId: null, method: null, installments: null, installmentId: null, value: null, netValue: null };
+  return { kind: 'ignore', uid: null, checkoutId: null, paymentId: null, method: null, installments: null, installmentId: null, value: null, netValue: null, refunded: null };
 }
 
 function num(v) {
@@ -142,6 +144,14 @@ function installmentsOf(p, method) {
   return null;
 }
 
+// Soma dos reembolsos concluídos da cobrança (payment.refunds[]), ou null se não vier.
+function refundedOf(p) {
+  if (!Array.isArray(p.refunds)) return null;
+  const done = p.refunds.filter((r) => r && r.status === 'DONE' && num(r.value) !== null);
+  if (!done.length) return null;
+  return Math.round(done.reduce((a, r) => a + r.value, 0) * 100) / 100;
+}
+
 function classifyEvent(body) {
   if (!body || typeof body !== 'object') return ignore();
   const event = body.event;
@@ -155,6 +165,7 @@ function classifyEvent(body) {
   let kind = null;
   if (PAID_PAYMENT_EVENTS.has(event)) kind = 'paid';
   else if (REFUND_EVENTS.has(event)) kind = 'refunded';
+  else if (PARTIAL_REFUND_EVENTS.has(event)) kind = 'partial-refund';
   else if (CHARGEBACK_EVENTS.has(event)) kind = 'chargeback';
   else if (REJECT_EVENTS.has(event)) kind = 'rejected';
   if (!kind) return ignore();
@@ -172,6 +183,7 @@ function classifyEvent(body) {
     installmentId: str(p.installment),
     value: num(p.value),
     netValue: num(p.netValue),
+    refunded: refundedOf(p),
   };
 }
 
