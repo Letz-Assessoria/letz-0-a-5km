@@ -15,7 +15,7 @@ const core = createRequire(import.meta.url)('../../public/lib/core.js');
 
 const { WEEK_MS } = core;
 const DAY = 864e5;
-const FS_URL = 'https://firebasestorage.googleapis.com/v0/b/demo-letz.appspot.com/o/avatars%2Falice.jpg?alt=media';
+const FS_URL = 'https://firebasestorage.googleapis.com/v0/b/letz-0-aos-5km.firebasestorage.app/o/avatars%2Falice.jpg?alt=media';
 
 setLogLevel('silent');
 
@@ -174,6 +174,7 @@ describe('firestore.rules', () => {
     await assertFails(updateDoc(ref, { name: 42 }));
     await assertFails(updateDoc(ref, { photoURL: 'https://evil.example/pixel.gif' }));
     await assertFails(updateDoc(ref, { photoURL: 'javascript:alert(1)' }));
+    await assertFails(updateDoc(ref, { photoURL: 'https://firebasestorage.googleapis.com/v0/b/outro-projeto.firebasestorage.app/o/pixel.gif' }));
     await assertFails(updateDoc(ref, { profiled: 'sim' }));
     for (const h of ['Alice', 'al', 'a'.repeat(31), 'ali ce', 'ali<b>']) {
       await seed((f) => setDoc(doc(f, 'handles', h), { uid: ALICE }));
@@ -181,7 +182,7 @@ describe('firestore.rules', () => {
     }
     await assertSucceeds(updateDoc(ref, { name: 'x'.repeat(80), photoURL: '' }));
     await assertFails(updateDoc(ref, { photoURL: 'http://127.0.0.1:9199/v0/b/demo-letz.appspot.com/o/a.jpg' }));
-    await assertSucceeds(updateDoc(ref, { photoURL: 'https://firebasestorage.googleapis.com/v0/b/demo-letz.appspot.com/o/a.jpg' }));
+    await assertSucceeds(updateDoc(ref, { photoURL: 'https://firebasestorage.googleapis.com/v0/b/letz-0-aos-5km-dev.firebasestorage.app/o/a.jpg' }));
   });
 
   it('payments: aluno não lê; admin lê; ninguém escreve', async () => {

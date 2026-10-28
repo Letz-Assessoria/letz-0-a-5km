@@ -4,7 +4,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
 const root = new URL('../', import.meta.url);
-const prod = "v.matches('^https://firebasestorage[.]googleapis[.]com/v0/b/.*')";
+const prod = "v.matches('^https://firebasestorage[.]googleapis[.]com/v0/b/letz-0-aos-5km(-dev)?[.]firebasestorage[.]app/o/.*')";
 const src = readFileSync(new URL('firestore.rules', root), 'utf8');
 if (!src.includes(prod)) throw new Error('imgUrlOk mudou; ajuste scripts/make-test-rules.mjs');
 const test = src.replace(prod, prod + "\n        || v.matches('^http://(127[.]0[.]0[.]1|localhost):9199/v0/b/.*')");
