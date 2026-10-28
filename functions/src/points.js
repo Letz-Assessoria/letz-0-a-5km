@@ -19,7 +19,11 @@ async function recomputeUser(db, uid, startMs) {
       if (d.at && typeof d.at.toMillis === 'function') marks[d.w + '-' + d.d] = d.at.toMillis();
     });
     const { points, done } = core.pointsFor(marks, startMs);
-    if (user.get('points') !== points || user.get('done') !== done) tx.update(userRef, { points, done });
+    const concluded = core.isConcluded(marks);
+    const upd = {};
+    if (user.get('points') !== points || user.get('done') !== done) { upd.points = points; upd.done = done; }
+    if ((user.get('concluded') === true) !== concluded) upd.concluded = concluded;
+    if (Object.keys(upd).length) tx.update(userRef, upd);
   });
 }
 

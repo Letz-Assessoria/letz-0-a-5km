@@ -28,7 +28,7 @@
     return { points: pointedKeys(marks, startMs).size * 3, done: Object.keys(marks).length };
   }
 
-  function isConcluded(marks) { return !!marks['10-2'] && Object.keys(marks).length >= 24; }
+  function isConcluded(marks) { return !!marks['10-0'] && !!marks['10-1'] && !!marks['10-2'] && Object.keys(marks).length >= 24; }
 
   function normalizeCpf(s) { return String(s == null ? '' : s).replace(/\D/g, ''); }
 

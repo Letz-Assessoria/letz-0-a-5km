@@ -59,6 +59,17 @@ describe('functions de dados', () => {
     await waitFor(userIs('ana', 9, 4));
   });
 
+  it('concluded: 24 treinos com as três finais marca true; apagar uma final volta a false', async () => {
+    await mkUser('ana');
+    const keys = [];
+    for (let w = 0; w < 8; w++) for (let d = 0; d < 3; d++) keys.push([w, d]);
+    keys.push([10, 0], [10, 1], [10, 2]);
+    for (const [w, d] of keys.slice(0, 21)) await mkPost('ana', w, d, START + HOUR);
+    for (const [w, d] of keys.slice(24)) await mkPost('ana', w, d, START + HOUR);
+    await waitFor(async () => (await db.doc('users/ana').get()).get('concluded') === true);
+    await db.doc('posts/ana_10-1').delete();
+    await waitFor(async () => (await db.doc('users/ana').get()).get('concluded') === false);
+  });
   it('points: apagar um post recalcula', async () => {
     await mkUser('ana');
     for (let d = 0; d < 3; d++) await mkPost('ana', 1, d, START + (d + 1) * HOUR);
