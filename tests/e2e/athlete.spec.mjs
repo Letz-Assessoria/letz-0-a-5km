@@ -373,11 +373,30 @@ test.describe('medalha', () => {
     await waitUntil(async () => (await db.doc(`users/${a.uid}/private/medal`).get()).data().refundRequestedAt);
   });
 
+  test('reembolso do programa só no perfil: Treinos não tem o botão; perfil tem seção com contador, direto e ao recarregar, sem rolagem lateral', async ({ page }) => {
+    const a = await realStudent();
+    await db.doc(`users/${a.uid}/private/billing`).update({ paidAt: ts(Date.now() - 2 * DAY) });
+    await login(page, a);
+    await expect(page.getByRole('navigation', { name: 'Principal' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Solicitar reembolso' })).toHaveCount(0);
+    await expect(page.locator('#refund-program')).toHaveCount(0);
+    await page.goto('/#/perfil');
+    await expect(page.getByText('Pagamento e reembolso')).toBeVisible();
+    await expect(page.locator('#refund-program')).toContainText('Faltam 5 dias do prazo de reembolso');
+    await expect(page.locator('#refund-program').getByRole('button', { name: 'Solicitar reembolso' })).toBeVisible();
+    await page.reload();
+    await expect(page.locator('#refund-program')).toContainText('Faltam 5 dias');
+    await page.setViewportSize({ width: 390, height: 800 });
+    expect(await noHScroll(page)).toBe(true);
+  });
+
   test('reembolso do programa: contador de dias, WhatsApp e, depois do prazo, só o contato', async ({ page }) => {
     await page.addInitScript(() => { window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; }; });
     const a = await realStudent();
     await db.doc(`users/${a.uid}/private/billing`).update({ paidAt: ts(Date.now() - 2 * DAY) });
     await login(page, a);
+    await expect(page.getByRole('navigation', { name: 'Principal' })).toBeVisible();
+    await page.goto('/#/perfil');
     const card = page.locator('#refund-program');
     await expect(card).toContainText('Faltam 5 dias do prazo de reembolso');
     await card.getByRole('button', { name: 'Solicitar reembolso' }).click();

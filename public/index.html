@@ -788,7 +788,9 @@ function vProfile(){var D=V.draft,first=!S.profiled;
  (V.perr?'<p class="err" role="alert">'+esc(V.perr)+'</p>':'')+
  '<div class="stack" style="gap:8px"><span class="label">Assim você aparece no feed</span><div class="preview"><div class="post">'+(D.photo?'<div class="av me"><img src="'+esc(D.photo)+'" alt=""></div>':'<div class="av me" aria-hidden="true" id="pv-ini">'+esc(initials(D.name||D.handle||'?'))+'</div>')+'<div><div><span class="who" id="pv-handle">@'+esc(D.handle||'seu.instagram')+'</span> <span class="muted">· agora</span></div><div class="what">'+ic('run')+'<span>Fez o treino de terça da semana 1</span></div></div></div></div></div>'+
  '<button class="btn go wide" data-act="profile-save"'+(V.pbusy?' disabled':'')+'>'+(V.pbusy?'Salvando…':(first?'Salvar e continuar':'Salvar'))+' '+ic('arrow')+'</button>'+'<button class="linkbtn" data-act="to-privacy">Como usamos seus dados</button>'+(STANDALONE?'':'<button class="linkbtn" data-act="to-install">Como instalar o app no celular</button>')+
- (first?'':'<button class="btn line wide" data-act="profile-cancel">Cancelar</button>');}
+ (first?'':'<button class="btn line wide" data-act="profile-cancel">Cancelar</button>')+payBox();}
+/* perfil: seção 'Pagamento e reembolso' (só aluno com pagamento confirmado) */
+function payBox(){var c=programRefund();return c?'<div class="stack" style="gap:10px"><span class="label">Pagamento e reembolso</span>'+c+'</div>':'';}
 function openProfile(){V.draft={name:S.profiled?S.name:'',handle:S.handle,photo:S.photo};V.perr='';V.pbusy=false;V.view='profile';}
 function grab(){var n=document.getElementById('in-pname'),h=document.getElementById('in-handle');if(n)V.draft.name=n.value;if(h)V.draft.handle=h.value;}
 function cleanHandle(v){return LetzCore.cleanHandle(v);}
@@ -999,7 +1001,7 @@ function lookupAddrCep(g,p,alive,c){var msg=document.getElementById(p+'-cep-msg'
   g.street=j.logradouro||'';g.district=j.bairro||'';g.city=j.localidade||'';g.uf=j.uf||'';
   say('Endereço encontrado. Falta só o número.');reveal(!(g.street&&g.district&&g.city&&g.uf));}).catch(function(){if(!alive()||g.lastCep!==c)return;say('Não deu para buscar o CEP agora. Preencha o endereço abaixo.');reveal(true);});}
 function vAthlete(){var labels={treinos:['run','Treinos'],feed:['feed','Feed'],ranking:['rank','Ranking'],videos:['play','Vídeos']};
- var body=V.tab==='treinos'?header('Do 0 aos 5 km')+vTreinos()+programRefund():V.tab==='feed'?vFeed():V.tab==='ranking'?vRanking():V.tab==='videos'?vVideos():vFim();
+ var body=V.tab==='treinos'?header('Do 0 aos 5 km')+vTreinos():V.tab==='feed'?vFeed():V.tab==='ranking'?vRanking():V.tab==='videos'?vVideos():vFim();
  if(!V.mAuto&&medalEligible()){V.mAuto=true;V.mo={step:'intro',d:{},saved:null,other:false,loading:false,busy:false,err:''};focusMo();}
  return '<div class="view">'+body+'</div>'+vSheet()+vMedalModal()+
  '<nav class="nav" aria-label="Principal"><div>'+['treinos','feed','ranking','videos'].map(function(t){return '<button data-act="tab" data-t="'+t+'"'+(V.tab===t||(t==='treinos'&&V.tab==='fim')?' aria-current="page"':'')+'>'+ic(labels[t][0])+labels[t][1]+'</button>';}).join('')+'</div></nav>';}
@@ -1372,7 +1374,7 @@ app.addEventListener('click',function(e){var b=e.target.closest('[data-act]');if
  else if(a==='mo-pay'){if(!V.mo||V.mo.busy)return;medalPay({useSignupAddress:true});softRender();return;}
  else if(a==='md-addr-edit'){V.mo.d.addrManual=true;var y3=window.scrollY;render();window.scrollTo(0,y3);var n3=document.getElementById('md-street');if(n3)n3.focus({preventScroll:true});}
  else if(a==='refund'){var rp=b.getAttribute('data-p');if(!window.LetzFB||V.rbusy)return;var ru=waUrl('Oi! '+waWho()+' e quero solicitar o reembolso '+(rp==='medal'?'da medalha':'do programa')+' Do 0 aos 5 km.');if(ru)window.open(ru,'_blank','noopener');V.rbusy=true;V.rerr='';
-  LetzFB.requestRefund(rp).then(function(){V.rbusy=false;V.rsent[rp]=true;softRender();},function(er){V.rbusy=false;V.rerr=LetzFB.errorMessage(er);softRender();});softRender();return;}
+  LetzFB.requestRefund(rp).then(function(){V.rbusy=false;V.rsent[rp]=true;billRender();},function(er){V.rbusy=false;V.rerr=LetzFB.errorMessage(er);billRender();});billRender();return;}
  else if(a==='rebuy'){if(!window.LetzFB||V.busy)return;V.busy=true;V.aerr='';render();LetzFB.rebuyProgram().then(function(r){location.assign(r.checkoutUrl);},function(er){V.busy=false;V.aerr=LetzFB.errorMessage(er);render();});return;}
  else if(a==='to-fim'){applyPath('#/app/fim');}
  else if(a==='trk-copy'){var tc=b.getAttribute('data-code');var tdone=function(){V.trkCopied=true;softRender();};try{navigator.clipboard.writeText(tc).then(tdone,function(){});}catch(er){}return;}
@@ -1407,7 +1409,9 @@ var stops=[],cmSubs={},rxLoading={},dataRole='';
 function softRender(){if(V.view!=='athlete'&&V.view!=='admin'&&V.view!=='medalha'&&V.view!=='bloqueado')return;var y=window.scrollY,ae=document.activeElement,id=ae&&ae.id,ss=null,se=null;try{ss=ae.selectionStart;se=ae.selectionEnd;}catch(e){}
  render();window.scrollTo(0,y);if(id){var el=document.getElementById(id);if(el){el.focus({preventScroll:true});try{if(ss!==null)el.setSelectionRange(ss,se);}catch(e){}}}}
 var billUid='',billStop=null;
-function watchBill(r,uid){var w=(r==='athlete'||r==='blocked')?uid:'';if(w===billUid)return;billUid=w;if(billStop){billStop();billStop=null;}V.bill=null;if(w)billStop=LetzFB.watchBilling(function(x){V.bill=x;softRender();});}
+/* redesenho depois de mudar V.bill/rsent/rerr: softRender ignora o perfil, então ele guarda o rascunho e redesenha aqui */
+function billRender(){if(V.view!=='profile'){softRender();return;}grab();var y=window.scrollY,id=(document.activeElement||{}).id;render();window.scrollTo(0,y);var el=id&&document.getElementById(id);if(el)el.focus({preventScroll:true});}
+function watchBill(r,uid){var w=(r==='athlete'||r==='blocked')?uid:'';if(w===billUid)return;billUid=w;if(billStop){billStop();billStop=null;}V.bill=null;if(w)billStop=LetzFB.watchBilling(function(x){V.bill=x;billRender();});}
 function resetData(){V.mo=null;V.mAuto=false;V.rsent={};V.rerr='';V.tdraft={};V.cd=null;V.cdirty=false;V.tsaved=false;V.csaved=false;V.cli=null;V.fq='';V.mst='todas';V.mq='';V.mform=null;V.mback=null;V.merr={};V.mnote={};V.mbusy={};V.mcopied='';stops.forEach(function(f){try{f();}catch(e){}});stops=[];for(var id in cmSubs)cmSubs[id]();cmSubs={};rxLoading={};dataRole='';S=newS();}
 function syncMine(){var m={},c={},ph={};S.mine.forEach(function(p){if(p.medal)return;var k=p.w+'-'+p.d;m[k]=p.at;if(p.comment)c[k]=p.comment;if(p.imgURL)ph[k]=p.imgURL;});S.marks=m;S.comments=c;S.wphotos=ph;}
 function applyCfg(c){var cf=S.cfg;if(c){if(c.start)S.start=c.start;S.texts=c.texts||{};S.videos=Array.isArray(c.videos)?c.videos:null;S.salesOpen=c.salesOpen!==false;
