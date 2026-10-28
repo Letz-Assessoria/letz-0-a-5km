@@ -137,6 +137,8 @@ describe('medalha: startMedalCheckout', () => {
     assert.equal(sent.length, 1);
     const c = sent[0];
     assert.equal(c.items[0].value, 35);
+    assert.equal(c.items[0].name, 'Medalha Letz bora!');
+    assert.equal(c.items[0].description, 'Frete da medalha de conclusão');
     assert.deepEqual(c.chargeTypes, ['DETACHED']);
     assert.equal(c.installment, null);
     assert.equal(c.externalReference, s.uid);

@@ -61,6 +61,8 @@ function medalCheckoutArgs(uid, customerData) {
     expiredUrl: `${app}/#/app/fim`,
     minutesToExpire: MINUTES_TO_EXPIRE,
     customerData,
+    itemName: 'Medalha Letz bora!',
+    itemDescription: 'Frete da medalha de conclusão',
   };
 }
 

@@ -79,6 +79,17 @@ describe('createCheckout', () => {
     assert.ok(exp >= before + 60 * 60000 && exp <= Date.now() + 60 * 60000, 'expiresAt = agora + minutesToExpire');
   });
 
+  it('createCheckout aceita nome e descrição do item (medalha) e mantém os do programa por padrão', async () => {
+    const { impl, calls } = fakeFetch({ id: 'c1', link: 'https://x/c1' });
+    const client = createClient({ baseUrl: BASE, apiKey: KEY, fetchImpl: impl });
+    await client.createCheckout({ ...CHECKOUT_ARGS, itemName: 'Medalha Letz bora!', itemDescription: 'Frete da medalha de conclusão' });
+    await client.createCheckout(CHECKOUT_ARGS);
+    assert.equal(calls[0].body.items[0].name, 'Medalha Letz bora!');
+    assert.equal(calls[0].body.items[0].description, 'Frete da medalha de conclusão');
+    assert.equal(calls[1].body.items[0].name, 'Do 0 aos 5 km');
+    await assert.rejects(client.createCheckout({ ...CHECKOUT_ARGS, itemName: 'x'.repeat(31) }), /itemName/);
+  });
+
   it('createCheckout com erro do Asaas lança erro com status e descrição, sem a chave', async () => {
     const { impl } = fakeFetch({ errors: [{ code: 'invalid_object', description: 'Campo inválido.' }] }, 400);
     const client = createClient({ baseUrl: BASE, apiKey: KEY, fetchImpl: impl });

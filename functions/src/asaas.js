@@ -59,11 +59,18 @@ function createClient({ baseUrl, apiKey, fetchImpl } = {}) {
     return data;
   }
 
-  async function createCheckout({ uid, value, maxInstallments, successUrl, cancelUrl, expiredUrl, minutesToExpire, customerData } = {}) {
+  async function createCheckout({ uid, value, maxInstallments, successUrl, cancelUrl, expiredUrl, minutesToExpire, customerData, itemName, itemDescription } = {}) {
     if (typeof uid !== 'string' || !uid) throw new Error('asaas: uid obrigatório');
     if (typeof value !== 'number' || !(value > 0)) throw new Error('asaas: value inválido');
     if (!Number.isInteger(maxInstallments) || maxInstallments < 1 || maxInstallments > 12) {
       throw new Error('asaas: maxInstallments deve ser de 1 a 12');
+    }
+    // Nome e descrição do item (padrão: o do programa). O Asaas limita o nome a 30 caracteres.
+    if (itemName !== undefined && (typeof itemName !== 'string' || !itemName || itemName.length > 30)) {
+      throw new Error('asaas: itemName deve ter de 1 a 30 caracteres');
+    }
+    if (itemDescription !== undefined && (typeof itemDescription !== 'string' || !itemDescription)) {
+      throw new Error('asaas: itemDescription inválida');
     }
     if (!successUrl || !cancelUrl) throw new Error('asaas: successUrl e cancelUrl obrigatórias');
     const minutes = minutesToExpire == null ? DEFAULT_MINUTES_TO_EXPIRE : minutesToExpire;
@@ -81,8 +88,8 @@ function createClient({ baseUrl, apiKey, fetchImpl } = {}) {
       callback,
       items: [
         {
-          name: ITEM_NAME,
-          description: ITEM_DESCRIPTION,
+          name: itemName || ITEM_NAME,
+          description: itemDescription || ITEM_DESCRIPTION,
           quantity: 1,
           value,
           imageBase64: itemImageBase64(),
