@@ -49,6 +49,14 @@ function applyPaid(tx, refs, ev, { billing, checkout }, alert) {
   if (billing.status !== 'paid') {
     Object.assign(update, { status: 'paid', checkoutId: ev.checkoutId, paidAt: now });
     tx.update(refs.user, { access: 'active' });
+    // Cupom de parceiro: o pagamento confirmado é a conversão (uma vez só: só na ativação).
+    const c = refs.coupon;
+    if (c && c.use && c.use.exists && c.use.get('status') === 'signed-up') {
+      const paid = checkout && typeof checkout.value === 'number' ? checkout.value
+        : (typeof billing.value === 'number' ? billing.value : ev.value);
+      tx.update(c.useRef, { status: 'converted', convertedAt: now, value: typeof paid === 'number' ? paid : null });
+      if (c.snap.exists) tx.update(c.ref, { convertedCount: FieldValue.increment(1) });
+    }
   }
   // CPF já foi (ou está indo) para outro cadastro, mas a pessoa pagou: ativa e sinaliza.
   const cpfGone = billing.cpfReleased === true || !!billing.cpfReclaimPendingBy;
@@ -76,6 +84,11 @@ function applyClosed(tx, refs, ev, { billing, checkout }) {
   if (!current) return 'não é o checkout pago atual';
   tx.update(refs.billing, { status: ev.kind, updatedAt: FieldValue.serverTimestamp() });
   tx.update(refs.user, { access: 'blocked' });
+  const c = refs.coupon;
+  if (c && c.use && c.use.exists && c.use.get('status') === 'converted') {
+    tx.update(c.useRef, { status: 'refunded', refundedAt: FieldValue.serverTimestamp() });
+    if (c.snap.exists) tx.update(c.ref, { convertedCount: FieldValue.increment(-1) });
+  }
   return 'bloqueado';
 }
 
@@ -108,13 +121,20 @@ function writePayment(tx, ref, ev, existing, { billing, checkout, uid }) {
     uid, checkoutId: ev.checkoutId, status,
     method: ev.method || (existing && existing.method) || billing.method || null,
     installments: ev.installments || (existing && existing.installments) || billing.installments || null,
-    gross: existing && typeof existing.gross === 'number' ? existing.gross : Number(PROGRAM_PRICE.value()),
+    gross: existing && typeof existing.gross === 'number' ? existing.gross
+      : (checkout && typeof checkout.value === 'number' ? checkout.value
+        : (typeof billing.value === 'number' ? billing.value : Number(PROGRAM_PRICE.value()))),
     net: nets.length ? round2(nets.reduce((a, b) => a + b, 0)) : null,
     parts,
     product: PRODUCT,
     paidAt: existing && existing.paidAt ? existing.paidAt : (ev.kind === 'paid' || current ? now : null),
     updatedAt: now,
   };
+  const coupon = (existing && existing.coupon) || (checkout && checkout.coupon) || billing.coupon || null;
+  if (coupon) {
+    doc.coupon = coupon;
+    doc.percent = (existing && existing.percent) || (checkout && checkout.percent) || billing.percent || null;
+  }
   tx.set(ref, doc);
 }
 
@@ -157,6 +177,14 @@ async function processEvent(db, body) {
     const [userSnap, billingSnap, paySnap] = refs
       ? await Promise.all([tx.get(refs.user), tx.get(refs.billing), refs.payment ? tx.get(refs.payment) : null])
       : [];
+    // Cupom de parceiro (código gravado por nós no billing): lê o uso e o cupom antes de escrever.
+    const couponCode = billingSnap && billingSnap.exists ? billingSnap.get('coupon') : null;
+    if (refs && validId(couponCode)) {
+      const ref = db.doc('coupons/' + couponCode);
+      const useRef = db.doc(`coupons/${couponCode}/uses/${uid}`);
+      const [snap, use] = await Promise.all([tx.get(ref), tx.get(useRef)]);
+      refs.coupon = { ref, useRef, snap, use };
+    }
 
     tx.create(eventRef, {
       type: typeof body.event === 'string' ? body.event : null,

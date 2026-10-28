@@ -30,11 +30,11 @@ function customerDataOf(name, profile) {
   return data;
 }
 
-function checkoutArgs(uid, customerData) {
+function checkoutArgs(uid, customerData, value) {
   const app = APP_URL.value().replace(/\/+$/, '');
   return {
     uid,
-    value: Number(PROGRAM_PRICE.value()),
+    value: typeof value === 'number' && value > 0 ? value : Number(PROGRAM_PRICE.value()),
     maxInstallments: Number(MAX_INSTALLMENTS.value()),
     successUrl: `${app}/#/confirmando`,
     cancelUrl: `${app}/#/aguardando`,

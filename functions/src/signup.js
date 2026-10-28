@@ -6,7 +6,7 @@ const logger = require('firebase-functions/logger');
 const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
 const core = require('../shared/core.js');
-const { asaasClient, checkoutArgs, customerDataOf } = require('./billing-config.js');
+const { asaasClient, checkoutArgs, customerDataOf, PROGRAM_PRICE } = require('./billing-config.js');
 const { safeErr } = require('./safe.js');
 
 // Uma só mensagem para CPF e e-mail repetidos: não revela qual dos dois existe.
@@ -16,6 +16,10 @@ const MSG_SALES_CLOSED = 'As vendas desta turma estão fechadas.';
 const MSG_RATE = 'Muitas tentativas. Tente de novo em alguns minutos.';
 const MSG_PAID = 'O pagamento já foi feito.';
 const MSG_CLOSED = 'Este cadastro foi encerrado. Fale com a Letz.';
+// Uma só mensagem para cupom inexistente, inativo, vencido ou esgotado: não revela qual.
+const MSG_COUPON = 'Cupom inválido ou esgotado.';
+const COUPON_RE = /^[A-Z0-9]{4,20}$/;
+const round2 = (n) => Math.round(n * 100) / 100;
 
 const HOUR_MS = 3600e3;
 // Reserva órfã (função caiu entre reservar o CPF e gravar a conta): retomável
@@ -48,7 +52,13 @@ function validate(data) {
   const address = core.cleanAddress(d.address);
   if (!address) throw bad('Confira o endereço: CEP, rua, número, bairro, cidade e estado.');
   if (d.acceptPolicy !== true) throw bad('É preciso aceitar a política de privacidade.');
-  return { name, email, password, cpf, phone, address };
+  let coupon = null;
+  if (d.coupon !== undefined && d.coupon !== null && d.coupon !== '') {
+    if (typeof d.coupon !== 'string') throw bad(MSG_COUPON);
+    coupon = d.coupon.trim().toUpperCase() || null;
+    if (coupon && !COUPON_RE.test(coupon)) throw bad(MSG_COUPON);
+  }
+  return { name, email, password, cpf, phone, address, coupon };
 }
 
 // Falhas injetáveis só no emulador (testes): testFaults/{name}.
@@ -59,6 +69,18 @@ async function faultValue(db, name, field) {
 }
 async function fault(db, name, flag) {
   return (await faultValue(db, name, flag)) === true;
+}
+
+// Cupom utilizável: existe, ativo, não vencido e (se tiver limite) com cadastros sobrando.
+function couponUsable(snap) {
+  if (!snap.exists) return false;
+  if (snap.get('active') !== true) return false;
+  const exp = snap.get('expiresAt');
+  if (exp && exp.toMillis() <= Date.now()) return false;
+  const max = snap.get('maxUses');
+  if (typeof max === 'number' && (snap.get('usedCount') || 0) >= max) return false;
+  const pct = snap.get('percent');
+  return Number.isInteger(pct) && pct >= 1 && pct <= 50;
 }
 
 // Conta que perdeu o CPF (ou está perdendo) não paga nem abre checkout.
@@ -288,9 +310,15 @@ async function cleanupAmbiguousCreate(db, uid, email) {
 // Abre um checkout no Asaas e grava checkouts/{id} e o billing, se ainda pendente.
 // Se o billing deixou de estar pendente (pagamento chegou no meio), cancela o novo checkout.
 async function openCheckout(db, uid) {
-  const [userDoc, profileDoc] = await Promise.all([db.doc('users/' + uid).get(), db.doc(`users/${uid}/private/profile`).get()]);
+  const [userDoc, profileDoc, billingDoc] = await Promise.all([
+    db.doc('users/' + uid).get(), db.doc(`users/${uid}/private/profile`).get(), db.doc(`users/${uid}/private/billing`).get(),
+  ]);
   const customerData = customerDataOf(userDoc.get('name'), profileDoc.exists ? profileDoc.data() : null);
-  const checkout = await asaasClient().createCheckout(checkoutArgs(uid, customerData));
+  // Conta com cupom: o valor com desconto foi fixado no cadastro e é o mesmo em toda reabertura.
+  const coupon = billingDoc.exists ? billingDoc.get('coupon') || null : null;
+  const percent = coupon ? billingDoc.get('percent') : null;
+  const value = coupon ? billingDoc.get('value') : undefined;
+  const checkout = await asaasClient().createCheckout(checkoutArgs(uid, customerData, value));
   const expiresAt = Timestamp.fromDate(new Date(checkout.expiresAt));
   const billingRef = db.doc(`users/${uid}/private/billing`);
   const saved = await db.runTransaction(async (tx) => {
@@ -299,6 +327,7 @@ async function openCheckout(db, uid) {
     const ok = billing.exists && billing.get('status') === 'pending' && !gone;
     tx.set(db.doc('checkouts/' + checkout.id), {
       uid, createdAt: FieldValue.serverTimestamp(), expiresAt, status: ok ? 'active' : 'canceled',
+      ...(coupon ? { coupon, percent, value } : {}),
     });
     if (ok) {
       tx.update(billingRef, {
@@ -319,7 +348,7 @@ async function openCheckout(db, uid) {
 }
 
 async function signup(request) {
-  const { name, email, password, cpf, phone, address } = validate(request.data);
+  const { name, email, password, cpf, phone, address, coupon } = validate(request.data);
   const db = getFirestore();
   await rateLimit(db, request);
 
@@ -339,6 +368,10 @@ async function signup(request) {
       throw new HttpsError('internal', 'Não foi possível criar a conta. Tente de novo.');
     }
   }
+
+  // Confere o cupom cedo (leitura simples) para não criar/apagar conta à toa.
+  // A validação que vale é a da transação que grava a conta.
+  if (coupon && !couponUsable(await db.doc('coupons/' + coupon).get())) throw new HttpsError('failed-precondition', MSG_COUPON);
 
   const uid = db.collection('users').doc().id;
   const reservation = await reserveCpf(db, cpf, uid);
@@ -366,22 +399,43 @@ async function signup(request) {
   }
 
   const now = FieldValue.serverTimestamp();
-  const batch = db.batch();
-  batch.set(db.doc('users/' + uid), {
+  const userDoc = {
     name, handle: '', photoURL: '', profiled: false, welcomed: false,
     access: 'pending', points: 0, done: 0, createdAt: now,
-  });
-  batch.set(db.doc(`users/${uid}/private/profile`), { email, cpf, phone, address, policyAcceptedAt: now });
-  batch.set(db.doc(`users/${uid}/private/billing`), {
-    checkoutId: null, url: null, expiresAt: null, status: 'pending', updatedAt: now,
-  });
+  };
+  const profileDoc = { email, cpf, phone, address, policyAcceptedAt: now };
+  const billingDoc = { checkoutId: null, url: null, expiresAt: null, status: 'pending', updatedAt: now };
   try {
     if (await fault(db, 'signup', 'failBatch')) throw new Error('falha simulada no batch');
-    await batch.commit();
+    if (coupon) {
+      // Cadastro com cupom: conta e uso do cupom na mesma transação (o limite não estoura em corrida).
+      const couponRef = db.doc('coupons/' + coupon);
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(couponRef);
+        if (!couponUsable(snap)) throw new HttpsError('failed-precondition', MSG_COUPON);
+        const percent = snap.get('percent');
+        const value = round2(Number(PROGRAM_PRICE.value()) * (1 - percent / 100));
+        tx.update(couponRef, { usedCount: FieldValue.increment(1) });
+        tx.create(db.doc(`coupons/${coupon}/uses/${uid}`), {
+          name, partnerUid: snap.get('partnerUid') || null, at: now, status: 'signed-up',
+        });
+        tx.create(db.doc('users/' + uid), userDoc);
+        tx.create(db.doc(`users/${uid}/private/profile`), profileDoc);
+        tx.create(db.doc(`users/${uid}/private/billing`), { ...billingDoc, coupon, percent, value });
+      });
+    } else {
+      const batch = db.batch();
+      batch.set(db.doc('users/' + uid), userDoc);
+      batch.set(db.doc(`users/${uid}/private/profile`), profileDoc);
+      batch.set(db.doc(`users/${uid}/private/billing`), billingDoc);
+      await batch.commit();
+    }
   } catch (err) {
-    logger.error('signup: não gravou a conta; desfazendo', { uid, err: safeErr(err) });
+    const couponErr = err instanceof HttpsError;
+    if (!couponErr) logger.error('signup: não gravou a conta; desfazendo', { uid, err: safeErr(err) });
     await deleteAuthUser(uid);
     await undoCpf();
+    if (couponErr) throw err;
     throw new HttpsError('internal', 'Não foi possível criar a conta. Tente de novo.');
   }
 
