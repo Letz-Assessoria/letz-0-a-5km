@@ -56,6 +56,10 @@ Fontes: revisão final do PR #2, revisão da Task 12, revisões de segurança au
 ## 5b. Pendências que ficaram da Parte 3
 
 - [ ] **Checkout órfão em `rebuyProgram`.** Duas chamadas simultâneas podem abrir dois checkouts do programa; o segundo fica órfão no Asaas (o duplicado pago só gera alerta).
+- [ ] **Checkout da medalha sem `checkouts/{id}` confiável (revisão final M-4).** Se a transação de `startMedalCheckout` falha depois de `createCheckout`, o checkout fica ativo no Asaas sem documento; e o `cancelQuietly` grava `checkouts/{id}` só com `status: canceled`, sem `kind` nem `uid`. Um pagamento desses cairia no ramo do programa. Tratar com `try/catch` + cancelamento, gravar `kind`/`uid`/`value` no cancelado e, no ramo do programa, recusar `paid` sem `checkouts/{id}` de valor diferente de `PROGRAM_PRICE` (com alerta). Sem remendo agora: o aluno não recebe a URL nesses casos.
+- [ ] **Duas chamadas simultâneas de `startMedalCheckout` com endereços diferentes (M-5).** A segunda sobrescreve o pedido e o checkout da primeira não é cancelado; se for pago, `medal.address` fica com o endereço da segunda. Cancelar também o checkout sobrescrito dentro da transação.
+- [ ] **Preço da medalha fixo no cliente (M-8).** `MEDAL_PRICE='R$ 35,00'` em `public/index.html` não acompanha o parâmetro do servidor; devolver o preço pela callable ou por `config/app`.
+- [ ] **Contas reembolsadas antes do contador `refundCount`.** Ausente conta como 0 (documentado em `startMedalCheckout`); se existir conta antiga reembolsada em produção, gravar `refundCount: 1` à mão.
 - [ ] **Lista de concluídos e escala do painel.** A aba Medalhas lê um listener de `private/medal` por aluno concluído; para turmas grandes, guardar o resumo em `users/{uid}` ou paginar.
 - [ ] **Status da medalha em Atletas.** A aba Atletas mostra só a marca de reembolso; falta o status do pedido (pago, enviado, entregue) por aluno.
 - [ ] **Foto órfã no storage.** Foto anexada a um post de medalha ou de treino que não é publicado (ou é apagado) fica no Storage sem referência; falta uma limpeza.
