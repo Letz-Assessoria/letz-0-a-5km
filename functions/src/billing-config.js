@@ -23,10 +23,11 @@ function asaasClient() {
 
 // Dados do cadastro para o checkout do Asaas abrir já preenchido. Sem endereço (conta antiga),
 // devolve undefined e o Asaas pede tudo na própria página. `address` (opcional) é o endereço
-// de entrega escolhido (medalha); sem ele vale o do cadastro.
+// de entrega escolhido (medalha); sem ele vale o do cadastro. Perfil ausente também devolve
+// undefined (CPF e telefone só existem no perfil): o Asaas pede os dados na própria página.
 function customerDataOf(name, profile, address) {
   const a = address || (profile && profile.address);
-  if (!a || !profile.cpf || !profile.email || !profile.phone || !name) return undefined;
+  if (!a || !profile || !profile.cpf || !profile.email || !profile.phone || !name) return undefined;
   const data = {
     name, cpfCnpj: profile.cpf, email: profile.email, phone: profile.phone,
     address: a.street, addressNumber: a.number, province: a.district, postalCode: a.cep, city: a.city,

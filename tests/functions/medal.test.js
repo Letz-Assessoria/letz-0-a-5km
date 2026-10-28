@@ -282,6 +282,20 @@ describe('medalha: startMedalCheckout', () => {
     assert.ok((await get(`users/${s.uid}/private/medal`)).refundRequestedAt);
   });
 
+  it('conta sem private/profile: com endereço informado abre o checkout sem customerData; useSignupAddress dá invalid-argument', async () => {
+    const s = await concluded();
+    await db.doc(`users/${s.uid}/private/profile`).delete();
+    const address = { cep: '01310-100', street: 'Avenida Paulista', number: '1000', complement: '', district: 'Bela Vista', city: 'São Paulo', uf: 'SP' };
+    const ok = await call('startMedalCheckout', { useSignupAddress: false, address }, s.token);
+    assert.equal(ok.error, undefined, JSON.stringify(ok.error));
+    const c = (await medalCheckouts())[0];
+    assert.equal(c.customerData, null);
+    assert.equal((await get(`users/${s.uid}/private/medal`)).address.street, 'Avenida Paulista');
+    await db.doc(`users/${s.uid}/private/medal`).delete();
+    const no = await call('startMedalCheckout', { useSignupAddress: true }, s.token);
+    assert.equal(no.error && no.error.status, 'INVALID_ARGUMENT');
+  });
+
   it('endereço inválido: invalid-argument; cadastro sem endereço com useSignupAddress também', async () => {
     const s = await concluded();
     const bad = await call('startMedalCheckout', { useSignupAddress: false, address: { cep: '123', street: '' } }, s.token);
