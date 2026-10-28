@@ -456,6 +456,37 @@ describe('medalha: envio (updateMedalOrder, resendMedalEmail)', () => {
   });
 });
 
+describe('mailer', () => {
+  const mailer = () => require('./src/mailer.js');
+  const withEnv = async (value, fn) => {
+    const old = process.env.FUNCTIONS_EMULATOR;
+    if (value === undefined) delete process.env.FUNCTIONS_EMULATOR; else process.env.FUNCTIONS_EMULATOR = value;
+    try {
+      return await fn();
+    } finally {
+      if (old === undefined) delete process.env.FUNCTIONS_EMULATOR; else process.env.FUNCTIONS_EMULATOR = old;
+    }
+  };
+
+  it('no emulador, sem GMAIL_APP_PASSWORD, usa o transporte falso e guarda a última mensagem', async () => {
+    const r = await withEnv('true', () => mailer().sendMail({ to: 'a@b.com', subject: 'Oi', text: 'Texto' }));
+    assert.deepEqual(r, { sent: true, fake: true });
+    assert.equal(mailer().__lastFake().to, 'a@b.com');
+    assert.equal(mailer().__lastFake().subject, 'Oi');
+  });
+
+  it('produção (fora do emulador) sem GMAIL_APP_PASSWORD: sent:false not-configured, sem transporte falso', async () => {
+    const before = mailer().__lastFake();
+    const r = await withEnv(undefined, () => mailer().sendMail({ to: 'c@d.com', subject: 'Prod', text: 'Texto' }));
+    assert.deepEqual(r, { sent: false, reason: 'not-configured' });
+    assert.equal(mailer().__lastFake(), before);
+  });
+
+  it('nunca lança: dados faltando devolve sent:false', async () => {
+    assert.equal((await mailer().sendMail({ to: 'a@b.com' })).sent, false);
+  });
+});
+
 describe('medalha: webhook', () => {
   before(async () => {
     fake = await startFakeAsaas({ port: 7777 });
@@ -671,20 +702,5 @@ describe('medalha: webhook', () => {
     assert.equal((await hook(checkoutPaid(s.uid, 'orfao-medalha'))).status, 200);
     assert.deepEqual(await programState(s.uid), before);
     assert.deepEqual(await alertTypes(), ['unknown-uid']);
-  });
-});
-
-describe('mailer', () => {
-  it('sem GMAIL_APP_PASSWORD usa o transporte falso e guarda a última mensagem', async () => {
-    const mailer = require('./src/mailer.js');
-    const r = await mailer.sendMail({ to: 'a@b.com', subject: 'Oi', text: 'Texto' });
-    assert.deepEqual(r, { sent: true, fake: true });
-    assert.equal(mailer.__lastFake().to, 'a@b.com');
-    assert.equal(mailer.__lastFake().subject, 'Oi');
-  });
-
-  it('nunca lança: dados faltando devolve sent:false', async () => {
-    const mailer = require('./src/mailer.js');
-    assert.deepEqual(await mailer.sendMail({ to: 'a@b.com' }), { sent: false });
   });
 });
