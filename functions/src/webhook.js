@@ -127,6 +127,8 @@ async function processEvent(db, body) {
   if (ev.checkoutId && !validId(ev.checkoutId)) {
     return { result: 'ignorado', warn: 'checkoutId fora do formato', ev };
   }
+  // Evento sem efeito para a Letz (PAYMENT_CREATED etc.): não gasta transação nem cria doc.
+  if (ev.kind === 'ignore') return { result: 'ignorado' };
   const eventRef = db.doc('asaasEvents/' + eventId);
 
   return db.runTransaction(async (tx) => {
