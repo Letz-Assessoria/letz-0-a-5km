@@ -294,6 +294,29 @@ async function clearWorkoutContent(w, d, what) {
   }
 }
 
+// Post da medalha: um por aluno (id {uid}_medal), sem pontos; as regras exigem o pedido enviado.
+async function postMedal({ comment, photoBlob }) {
+  const { uid, u } = mine();
+  const data = {
+    uid, handle: u.handle, name: u.name, photoURL: u.photoURL || '', medal: true, at: serverTimestamp(),
+    comment: typeof comment === 'string' ? comment : '', photoPath: '', imgURL: '', hidden: false, authorActive: true,
+  };
+  if (photoBlob) {
+    const path = `workouts/${uid}/medal.jpg`;
+    const r = sref(storage, path);
+    await uploadBytes(r, photoBlob, JPEG);
+    data.photoPath = path;
+    data.imgURL = await getDownloadURL(r);
+  }
+  await setDoc(doc(db, 'posts', `${uid}_medal`), data);
+}
+
+// Post da medalha do próprio aluno ao vivo; cb(null) enquanto não existe.
+function watchMyMedalPost(cb) {
+  return whenSession(isAthlete, (s) => onSnapshot(doc(db, 'posts', `${s.user.uid}_medal`),
+    (snap) => cb(snap.exists() ? mapPost(snap) : null), (err) => { fail(err); cb(null); }));
+}
+
 function watchMyPosts(cb) {
   return whenSession(isAthlete, (s) => onSnapshot(
     query(collection(db, 'posts'), where('uid', '==', s.user.uid)),
@@ -591,6 +614,7 @@ window.LetzFB = {
   saveProfile, markWelcomed, markWorkout, unmarkWorkout, setWorkoutContent, clearWorkoutContent,
   watchMyPosts, watchFeed, loadMoreFeed, watchRanking, watchConfig,
   loadMyReactions, toggleReaction, addComment, deleteComment, watchComments,
+  postMedal, watchMyMedalPost,
   startMedalCheckout, requestRefund, rebuyProgram, loadSignupAddress, watchMedal, watchBilling,
   saveConfig, listAthletes, listAlerts, listPayments, resolveAlert, createPartner, createCoupon, listCoupons, listCouponUses, setCouponActive, setCouponMax, setCouponPercent, setAccess, setPostHidden, setCommentHidden,
 };

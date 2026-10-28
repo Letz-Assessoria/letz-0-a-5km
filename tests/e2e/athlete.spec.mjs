@@ -1,7 +1,7 @@
 // e2e do aluno: perfil, treinos, feed, ranking, fotos, reações, comentários e a medalha (modal, endereço, pagamento, status e reembolso).
 import { test, expect } from '@playwright/test';
 import {
-  admin, auth, callable, checkoutPaid, clearRateLimits, db, emitMedalPaid, FAKE, makeAthlete, makeUser, mockViaCep, person,
+  admin, auth, callable, checkoutPaid, clearRateLimits, db, emitMedalPaid, FAKE, makeAthlete, makeCoach, makeUser, mockViaCep, person,
   resetStart, seedConcluded, setStart, storageObject, uniqueHandle, waitUntil, webhookToken, WEBHOOK,
 } from './helpers.mjs';
 
@@ -429,5 +429,88 @@ test.describe('medalha', () => {
     await page.keyboard.press('Escape');
     await page.goto('/#/app/fim');
     expect(await noHScroll(page)).toBe(true);
+  });
+});
+
+test.describe('post da medalha no feed', () => {
+  const order = (uid, status) => db.doc(`users/${uid}/private/medal`).set({
+    status, address: { cep: '50050000', street: 'Rua da Aurora', number: '100', complement: '', district: 'Boa Vista', city: 'Recife', uf: 'PE' },
+    paidAt: admin.firestore.Timestamp.now(), refundCount: 0,
+  });
+
+  test('pago ou reembolsado: sem botão; enviado: posta uma vez, aparece com selo, sem pontos; treinador esconde', async ({ page, browser }) => {
+    const a = await makeAthlete();
+    // Um treino real (a função recalcula pontos a partir dos posts): 3 pontos, 1 feito.
+    await db.doc(`posts/${a.uid}_1-0`).set({
+      uid: a.uid, handle: a.handle, name: a.name, photoURL: '', w: 1, d: 0, at: admin.firestore.Timestamp.now(),
+      comment: '', photoPath: '', imgURL: '', hidden: false, authorActive: true,
+    });
+    await waitUntil(async () => (await db.doc('users/' + a.uid).get()).data().points === 3);
+    await order(a.uid, 'paid');
+    await login(page, a);
+    await expect(page).toHaveURL(/#\/app\//);
+    await page.goto('/#/medalha');
+    await expect(page.getByText('Pago, aguardando envio')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Postar no feed' })).toHaveCount(0);
+
+    await order(a.uid, 'refunded');
+    await expect(page.getByRole('button', { name: 'Postar no feed' })).toHaveCount(0);
+
+    await order(a.uid, 'shipped');
+    await expect(page.getByRole('button', { name: 'Postar no feed' })).toBeVisible();
+    await page.getByRole('button', { name: 'Postar no feed' }).click();
+    await expect(page.getByText('Escreva como foi ou adicione uma foto.')).toBeVisible();
+    await page.getByRole('button', { name: 'Adicionar foto' }).click();
+    await page.locator('#ph-gal').setInputFiles(await jpeg(page, 1600, 1200));
+    await page.getByLabel('Como foi? (opcional)').fill('Chegou! Que orgulho');
+    await page.getByRole('button', { name: 'Postar no feed' }).click();
+    await expect(page.getByText('Sua medalha já está no feed.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Postar no feed' })).toHaveCount(0);
+
+    const post = (await waitUntil(async () => { const d = await db.doc(`posts/${a.uid}_medal`).get(); return d.exists ? d : null; })).data();
+    expect(post.medal).toBe(true);
+    expect(post.w).toBeUndefined();
+    expect(post.d).toBeUndefined();
+    expect(post.comment).toBe('Chegou! Que orgulho');
+    expect(post.photoPath).toBe(`workouts/${a.uid}/medal.jpg`);
+    expect((await storageObject(`workouts/${a.uid}/medal.jpg`)).contentType).toBe('image/jpeg');
+
+    // Outro aluno vê o selo, reage e comenta; nada de "treino" nem "undefined".
+    const b = await makeAthlete();
+    const ctx = await browser.newContext();
+    const pb = await ctx.newPage();
+    await login(pb, b);
+    await tab(pb, 'Feed');
+    const card = pb.locator('.post', { hasText: '@' + a.handle }).filter({ has: pb.locator('.tag', { hasText: 'Medalha' }) });
+    await expect(card).toBeVisible();
+    await expect(card.locator('.tag')).toHaveText('Medalha');
+    await expect(card).toContainText('Chegou! Que orgulho');
+    await expect(card.locator('.pimg')).toBeVisible();
+    await expect(card).not.toContainText(/undefined|treino de/);
+    await card.getByRole('button', { name: /Reagir com/ }).first().click();
+    await waitUntil(async () => Object.keys((await db.doc(`posts/${a.uid}_medal`).get()).data().rc || {}).length > 0);
+    await card.getByRole('button', { name: /Comentar/ }).click();
+    await card.getByLabel('Escreva um comentário').fill('Parabéns!');
+    await card.getByRole('button', { name: 'Enviar comentário' }).click();
+    await expect(card).toContainText('Parabéns!');
+
+    // Sem pontos: nem o aluno nem o ranking mudam.
+    await new Promise((r) => setTimeout(r, 1500));
+    const u = (await db.doc('users/' + a.uid).get()).data();
+    expect(u.points).toBe(3);
+    expect(u.done).toBe(1);
+
+    // Treinador vê o post sem "undefined" e esconde.
+    const cp = await (await browser.newContext()).newPage();
+    const c = await makeCoach();
+    await login(cp, c);
+    await cp.getByRole('group', { name: 'Seções' }).getByRole('button', { name: 'Feed' }).click();
+    const adm = cp.locator('.post', { hasText: '@' + a.handle }).filter({ has: cp.locator('.tag', { hasText: 'Medalha' }) });
+    await expect(adm.locator('.tag')).toHaveText('Medalha');
+    await expect(adm).not.toContainText(/undefined|treino de/);
+    await adm.getByRole('button', { name: 'Esconder post' }).click();
+    await waitUntil(async () => (await db.doc(`posts/${a.uid}_medal`).get()).data().hidden === true);
+    await expect(card).toHaveCount(0);
+    await ctx.close();
   });
 });

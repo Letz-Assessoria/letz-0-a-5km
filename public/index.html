@@ -544,7 +544,7 @@ function ic(n){return '<svg class="i" viewBox="0 0 24 24" aria-hidden="true">'+I
 
 function lastSunday18(){var d=new Date();d.setHours(18,0,0,0);d.setDate(d.getDate()-d.getDay());if(d>new Date())d.setDate(d.getDate()-7);return d.getTime();}
 var START_TURMA=Date.parse(LetzCore.DEFAULT_START_ISO);
-function newS(){return {points:0,uid:'',start:START_TURMA,name:'',handle:'',photo:'',profiled:false,welcomed:false,wphotos:{},myr:{},cm:{},medal:null,medalLoaded:false,videos:null,cfg:{av:'',wa:'558781908719',grupo:''},marks:{},comments:{},removed:{},texts:{},mine:[],feed:[],feedLoaded:false,feedMore:false,rank:[],rankLoaded:false,mineLoaded:false,athletes:null,alerts:[],payments:null,coupons:null,cuses:{},cstamp:{},cload:{},salesOpen:true};}
+function newS(){return {points:0,uid:'',start:START_TURMA,name:'',handle:'',photo:'',profiled:false,welcomed:false,wphotos:{},myr:{},cm:{},medal:null,medalLoaded:false,medalPost:null,medalPostLoaded:false,videos:null,cfg:{av:'',wa:'558781908719',grupo:''},marks:{},comments:{},removed:{},texts:{},mine:[],feed:[],feedLoaded:false,feedMore:false,rank:[],rankLoaded:false,mineLoaded:false,athletes:null,alerts:[],payments:null,coupons:null,cuses:{},cstamp:{},cload:{},salesOpen:true};}
 var S=newS();
 /* S é só um cache: os listeners do LetzFB (Firestore) preenchem; nada vai para o localStorage */
 function save(){return true;}
@@ -578,7 +578,7 @@ function postSocial(p,adm){var id=p.id,cl=cList(id,adm),h='<div class="react">';
  if(cl.length)h+='<div class="cmts">'+cl.map(function(c){return '<div class="cm"><span class="who">'+esc(c.who)+'</span>'+esc(c.text)+'<span class="when">'+ago(c.t)+'</span>'+(c.mine?'<button data-act="cmt-rm" data-id="'+id+'" data-c="'+esc(c.cid)+'" aria-label="Apagar comentário de '+esc(c.who)+'">apagar</button>':'')+'</div>';}).join('')+'</div>';
  if(V.copen[id])h+='<form class="cbox" data-id="'+id+'"><label class="sr" for="pc-'+id+'">Escreva um comentário</label><input id="pc-'+id+'" type="text" maxlength="200" autocomplete="off" placeholder="Escreva um comentário" value="'+esc(V.ptext[id]||'')+'"><button class="send" type="submit" aria-label="Enviar comentário">'+ic('arrow')+'</button></form>'+(V.cmErr[id]?'<p class="err" role="alert">'+esc(V.cmErr[id])+'</p>':'');
  return h;}
-function posts(adm){return S.feed.filter(function(p){return adm||!p.hidden;}).map(function(p){return {id:p.id,uid:p.uid,who:p.handle?'@'+p.handle:(p.name||'Aluno'),me:p.uid===S.uid,w:p.w,d:p.d,t:p.at,c:p.comment||'',ph:p.imgURL||'',photoURL:p.photoURL||'',rc:p.rc||{},hidden:!!p.hidden};});}
+function posts(adm){return S.feed.filter(function(p){return adm||!p.hidden;}).map(function(p){return {id:p.id,uid:p.uid,who:p.handle?'@'+p.handle:(p.name||'Aluno'),me:p.uid===S.uid,w:p.w,d:p.d,medal:p.medal===true,t:p.at,c:p.comment||'',ph:p.imgURL||'',photoURL:p.photoURL||'',rc:p.rc||{},hidden:!!p.hidden};});}
 function weekIdx(t){return LetzCore.weekIndex(S.start,t);}
 function pointedSet(){var o={};LetzCore.pointedKeys(S.marks,S.start).forEach(function(k){o[k]=1;});return o;}
 function myPoints(){return S.points||0;}
@@ -848,14 +848,14 @@ function vTreinos(){var cw=curWeek(), ended=projectEnded(), mw=myWeek(), w=V.wee
   h+='</section>';}
  h+='<div class="pace">'+ic('chat')+'<span>Corra devagar, num ritmo em que você consegue conversar.</span></div>';return h;}
 
-function postHtml(p,adm){return '<div class="post">'+avHtml(p.who,p.me,p.photoURL)+'<div><div><span class="who">'+esc(p.who)+'</span> <span class="muted">· '+ago(p.t)+'</span></div><div class="what">'+ic('run')+'<span>Fez o treino de '+DAYL[p.d]+' da semana '+p.w+'</span></div>'+(p.c?'<div class="c">'+esc(p.c)+'</div>':'')+(p.ph?'<img class="pimg" src="'+esc(p.ph)+'" alt="Foto do treino">':'')+postSocial(p,adm)+(adm?'<div class="row" style="margin-top:10px"><button class="btn line sm" data-act="post-hide" data-id="'+p.id+'" data-h="'+(p.hidden?'0':'1')+'">'+(p.hidden?'Restaurar post':'Esconder post')+'</button>'+(p.hidden?'<span class="muted">Escondido do feed</span>':'')+'</div>':'')+'</div></div>';}
+function postHtml(p,adm){return '<div class="post">'+avHtml(p.who,p.me,p.photoURL)+'<div><div><span class="who">'+esc(p.who)+'</span> <span class="muted">· '+ago(p.t)+'</span></div><div class="what">'+(p.medal?ic('check')+'<span>Recebeu a medalha do Do 0 aos 5 km<span class="tag">Medalha</span></span>':ic('run')+'<span>Fez o treino de '+DAYL[p.d]+' da semana '+p.w+'</span>')+'</div>'+(p.c?'<div class="c">'+esc(p.c)+'</div>':'')+(p.ph?'<img class="pimg" src="'+esc(p.ph)+'" alt="'+(p.medal?'Foto da medalha':'Foto do treino')+'">':'')+postSocial(p,adm)+(adm?'<div class="row" style="margin-top:10px"><button class="btn line sm" data-act="post-hide" data-id="'+p.id+'" data-h="'+(p.hidden?'0':'1')+'">'+(p.hidden?'Restaurar post':'Esconder post')+'</button>'+(p.hidden?'<span class="muted">Escondido do feed</span>':'')+'</div>':'')+'</div></div>';}
 function vFeed(){var l=posts();return header('Do 0 aos 5 km')+'<div class="stack" style="gap:6px"><span class="label">A turma</span><h1 class="disp" style="font-size:56px">Feed</h1></div><div>'+(l.length?l.map(function(p){return postHtml(p,false);}).join(''):'<p class="muted" role="status">'+(S.feedLoaded?'Ainda não há treinos da turma.':'Carregando…')+'</p>')+'</div>'+(S.feedMore&&l.length?'<button class="btn line wide" data-act="feed-more">Ver mais</button>':'');}
 function vRanking(){var r=ranking(),top=r.slice(0,3),order=[top[1],top[0],top[2]];
  var pod='<div class="podium">'+order.map(function(x){if(!x)return '<div></div>';var c=x===top[0]?' p1':'';return '<div class="pod'+c+'"><span class="disp">'+x.pos+'º</span><span class="n">'+esc(x.who)+'</span><span class="mono">'+x.pts+' pts</span></div>';}).join('')+'</div>';
  return header('Do 0 aos 5 km')+'<div class="stack" style="gap:6px"><span class="label">3 pontos por treino</span><h1 class="disp" style="font-size:56px">Ranking</h1></div>'+pod+
  '<div>'+(r.length?'':'<p class="muted" role="status">'+(S.rankLoaded?'Ainda não há alunos no ranking.':'Carregando…')+'</p>')+r.map(function(x){return '<div class="rank'+(x.me?' me':'')+'"><span class="pos">'+x.pos+'º</span><span>'+esc(x.who)+'</span><span class="pts">'+x.pts+' pts</span></div>';}).join('')+'</div>';}
 
-function vSheet(){if(!V.sheet)return '';return '<div class="sheet-bg" data-act="sheet-close"><div class="sheet" role="dialog" aria-modal="true" aria-label="Adicionar foto"><i class="grabber"></i><h2>Adicionar foto do treino</h2>'+
+function vSheet(){if(!V.sheet)return '';return '<div class="sheet-bg" data-act="sheet-close"><div class="sheet" role="dialog" aria-modal="true" aria-label="Adicionar foto"><i class="grabber"></i><h2>Adicionar foto '+(V.sheet==='medal'?'da medalha':'do treino')+'</h2>'+
  '<label class="opt" for="ph-gal"><span class="key">'+ic('image')+'</span>Escolher da galeria<input class="sr" id="ph-gal" type="file" accept="image/*"></label>'+
  '<button class="opt" style="border:0;width:100%;color:inherit;font:inherit;font-weight:600;text-align:left" data-act="cam-open">'+'<span class="key">'+ic('camera')+'</span>Tirar foto agora</button>'+
  '<button class="btn line wide" data-act="sheet-cancel">Cancelar</button></div></div>';}
@@ -966,8 +966,17 @@ function medalPay(payload){var m=V.mo;if(!window.LetzFB){m.err='Sem conexão com
  m.busy=true;m.err='';LetzFB.startMedalCheckout(payload).then(function(r){location.assign(r.checkoutUrl);},function(er){m.busy=false;m.err=LetzFB.errorMessage(er);softRender();});}
 /* abre sozinho uma vez por sessão, para quem concluiu e ainda não pagou a medalha */
 function medalEligible(){return role==='athlete'&&!!V.sdoc&&V.sdoc.concluded===true&&S.medalLoaded&&!medalPaid()&&!medalLocked();}
+/* post da medalha no feed: só enviada/entregue e uma vez (id uid_medal); mesmo formulário do treino, chave 'medal' */
+function medalPostBox(){var m=S.medal,k='medal';
+ if(!m||(m.status!=='shipped'&&m.status!=='delivered')||!S.medalPostLoaded)return '';
+ if(S.medalPost)return '<section class="card stack" id="medal-post"><span class="label">Feed da turma</span><p class="muted">Sua medalha já está no feed.</p></section>';
+ var pd=V.pending[k];
+ return '<section class="card stack" id="medal-post"><span class="label">Feed da turma</span><p class="muted">Conte para a turma que a medalha chegou. Só dá para postar uma vez.</p><div class="compose"><div class="field"><label for="c-'+k+'">Como foi? (opcional)</label><input id="c-'+k+'" type="text" maxlength="140" placeholder="Conte para a turma" value="'+esc(V.ctext[k]||'')+'"></div>'+
+  (pd?'<div class="thumb"><img src="'+pd+'" alt="Foto escolhida"><button class="iconbtn" data-act="ph-remove" data-k="'+k+'" aria-label="Remover foto">'+ic('x')+'</button></div>':'<button class="attach" data-act="ph-open" data-k="'+k+'">'+ic('image')+'Adicionar foto</button>')+
+  (V.cerr[k]?'<p class="err" role="alert">'+esc(V.cerr[k])+'</p>':'')+
+  '<button class="btn" data-act="post-medal"'+(V.cbusy[k]?' disabled':'')+'>'+(V.cbusy[k]?'Publicando…':'Postar no feed')+'</button></div></section>';}
 function vMedalha(){var m=S.medal,body;
- if(medalPaid())body='<section class="card stack">'+medalPanel()+'</section>';
+ if(medalPaid())body='<section class="card stack">'+medalPanel()+'</section>'+medalPostBox();
  else if(!S.medalLoaded||(m&&m.status==='pending'))body='<div class="card stack"><p role="status"><b>Confirmando seu pagamento…</b></p><p class="muted">No Pix, leva poucos segundos. No cartão, pode levar alguns minutos. Esta tela muda sozinha quando o pagamento for confirmado.</p></div>';
  else body='<div class="card stack"><p><b>Você ainda não tem uma medalha paga.</b></p><p class="muted">Se você acabou de pagar, aguarde alguns instantes. Se não, peça a sua medalha na tela de conclusão.</p></div>';
  return header('Do 0 aos 5 km')+'<div class="stack" style="gap:6px"><span class="label">Medalha Letz bora!</span><h1 class="disp" style="font-size:clamp(44px,13vw,72px)">'+(medalPaid()?'Sua<br>medalha':'Quase<br>lá')+'</h1></div>'+body+'<button class="btn line wide" data-act="to-fim">Voltar ao app</button>';}
@@ -1163,7 +1172,7 @@ applyPath(location.hash);
 var app=document.getElementById('app');
 function render(){routeSync();app.className=V.view==='sales'?'wide':V.view==='admin'?'adm':'';var v=V.view,st=function(h){return '<div class="view stack" style="gap:22px">'+h+'</div>';};
  app.innerHTML=v==='privacy'?'<div class="view">'+vPrivacy()+'</div>':v==='sales'?'<div class="view">'+vSales()+'</div>':v==='install'?'<div class="view">'+vInstall()+'</div>':v==='profile'?'<div class="view">'+vProfile()+'</div>':
-  v==='login'?st(vLogin()):v==='welcome'?st(vWelcome()):v==='cadastro'?st(vCadastro()):v==='esqueci'?st(vEsqueci()):v==='aguardando'?st(vAguardando()):v==='confirmando'?st(vConfirmando()):v==='bloqueado'?st(vBloqueado()):v==='medalha'?st(vMedalha()):
+  v==='login'?st(vLogin()):v==='welcome'?st(vWelcome()):v==='cadastro'?st(vCadastro()):v==='esqueci'?st(vEsqueci()):v==='aguardando'?st(vAguardando()):v==='confirmando'?st(vConfirmando()):v==='bloqueado'?st(vBloqueado()):v==='medalha'?st(vMedalha())+vSheet():
   v==='loading'?'<div class="view">'+(V.fbfail&&!window.LetzFB?'<div class="stack" style="align-items:center;padding:48px 0"><p class="err" role="alert">Não conseguimos conectar ao servidor. Confira sua internet.</p><button class="btn go" data-act="reload">Tentar de novo</button></div>':'<p class="muted" role="status" style="text-align:center;padding:48px 0">Carregando…</p>')+'</div>':v==='admin'?vAdmin()+vCli():vAthlete();}
 
 app.addEventListener('submit',function(e){e.preventDefault();
@@ -1295,6 +1304,10 @@ app.addEventListener('click',function(e){var b=e.target.closest('[data-act]');if
   if(!tx&&!ph)V.cerr[k]='Escreva como foi ou adicione uma foto.';
   else if(!V.cbusy[k]){var cp=k.split('-');V.cbusy[k]=true;V.cerr[k]='';
    dataToBlob(ph).then(function(bl){return LetzFB.setWorkoutContent(+cp[0],+cp[1],{comment:tx,photoBlob:bl});}).then(function(){delete V.pending[k];delete V.ctext[k];V.cbusy[k]=false;softRender();},function(er){V.cbusy[k]=false;V.cerr[k]=LetzFB.errorMessage(er);softRender();});}}
+ else if(a==='post-medal'){var mt=(V.ctext.medal||'').trim(),mph=V.pending.medal;
+  if(!mt&&!mph)V.cerr.medal='Escreva como foi ou adicione uma foto.';
+  else if(!V.cbusy.medal){V.cbusy.medal=true;V.cerr.medal='';
+   dataToBlob(mph).then(function(bl){return LetzFB.postMedal({comment:mt,photoBlob:bl});}).then(function(){delete V.pending.medal;delete V.ctext.medal;V.cbusy.medal=false;softRender();},function(er){V.cbusy.medal=false;V.cerr.medal=LetzFB.errorMessage(er);softRender();});}}
  else if(a==='ph-open'){V.sheet=k;}
  else if(a==='sg-addr-edit'){V.sg.addrManual=true;var y2=window.scrollY;render();window.scrollTo(0,y2);var n2=document.getElementById('sg-street');if(n2)n2.focus({preventScroll:true});}
  else if(a==='mo-open'){openMo('addr');return;}
@@ -1333,7 +1346,7 @@ app.addEventListener('click',function(e){var b=e.target.closest('[data-act]');if
  else if(a==='cm-hide'){admDo(LetzFB.setCommentHidden(b.getAttribute('data-id'),b.getAttribute('data-c'),b.getAttribute('data-h')==='1'));return;}
  else if(a==='to-privacy'){V.prevView=V.view;V.view='privacy';}
  else if(a==='privacy-back'){V.view=V.prevView||'sales';}
- var keep=(a==='react'||a==='cmt-toggle'||a==='cmt-rm'||a==='ph-open'||a==='ph-remove'||a==='sheet-close'||a==='sheet-cancel'||a==='os'||a==='mark'||a==='unmark'||a==='comment'||a==='week'||a==='t-save'||a==='t-discard'||a==='c-save'||a==='c-discard'||a==='v-add'||a==='v-rm'||a==='fin-per'||a==='fin-st'||a==='fin-tab'||a==='cli-open'||a==='cli-close'),y=window.scrollY;
+ var keep=(a==='react'||a==='cmt-toggle'||a==='cmt-rm'||a==='ph-open'||a==='ph-remove'||a==='sheet-close'||a==='sheet-cancel'||a==='os'||a==='mark'||a==='unmark'||a==='comment'||a==='post-medal'||a==='week'||a==='t-save'||a==='t-discard'||a==='c-save'||a==='c-discard'||a==='v-add'||a==='v-rm'||a==='fin-per'||a==='fin-st'||a==='fin-tab'||a==='cli-open'||a==='cli-close'),y=window.scrollY;
  render();window.scrollTo(0,keep&&!V.toTop?y:0);V.toTop=false;});
 render();
 /* dados: S é um cache preenchido pelos listeners do LetzFB; softRender redesenha sem perder rolagem nem foco */
@@ -1358,7 +1371,8 @@ function startData(){var adm=role==='admin';
  stops.push(LetzFB.watchRanking(function(r){S.rank=r;S.rankLoaded=true;softRender();}));
  if(adm){stops.push(LetzFB.listAthletes(function(l){S.athletes=l;softRender();}));stops.push(LetzFB.listAlerts(function(l){S.alerts=l;softRender();}));stops.push(LetzFB.listPayments(function(l){S.payments=l;softRender();}));stops.push(LetzFB.listCoupons(function(l){S.coupons=l;loadCouponUses();softRender();}));}
  if(!adm){stops.push(LetzFB.watchMyPosts(function(l){S.mine=l;S.mineLoaded=true;syncMine();softRender();}));
-  stops.push(LetzFB.watchMedal(function(x){S.medal=x;S.medalLoaded=true;softRender();}));}}
+  stops.push(LetzFB.watchMedal(function(x){S.medal=x;S.medalLoaded=true;softRender();}));
+  stops.push(LetzFB.watchMyMedalPost(function(x){S.medalPost=x;S.medalPostLoaded=true;softRender();}));}}
 /* sessão: o papel sai de LetzFB.onSession (Firebase Auth + users/{uid} ao vivo) */
 function fbReady(cb){if(window.LetzFB)cb();else document.addEventListener('letzfb-ready',cb,{once:true});}
 setTimeout(function(){if(!window.LetzFB){V.fbfail=true;render();}},10000);
