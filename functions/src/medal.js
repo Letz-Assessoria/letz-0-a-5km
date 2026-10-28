@@ -2,11 +2,13 @@
 // O pedido fica em users/{uid}/private/medal; o webhook (Task 3) o leva a "paid".
 const { HttpsError } = require('firebase-functions/v2/https');
 const logger = require('firebase-functions/logger');
+const { getAuth } = require('firebase-admin/auth');
 const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const core = require('../shared/core.js');
 const { asaasClient, medalCheckoutArgs, customerDataOf, MEDAL_PRICE } = require('./billing-config.js');
 const { safeErr } = require('./safe.js');
 const { marksFromPosts } = require('./points.js');
+const { sendMail } = require('./mailer.js');
 
 const MSG_ADDRESS = 'Confira o endereço: CEP, rua, número, bairro, cidade e estado.';
 const MSG_NOT_ELIGIBLE = 'A medalha é para quem concluiu o programa.';
@@ -103,4 +105,124 @@ async function startMedalCheckout(request) {
   return { checkoutUrl: outcome.url };
 }
 
-module.exports = { startMedalCheckout };
+// ---- Envio: callables do treinador (só admin) ----
+const TRACKING_RE = /^[A-Za-z0-9-]{3,40}$/;
+// Por onde se pode ir a partir de cada status: um passo à frente ou um passo atrás.
+const NEXT = { paid: ['shipped'], shipped: ['delivered', 'paid'], delivered: ['shipped'] };
+const MSG_TRACKING = 'Informe o código de rastreio (3 a 40 letras, números ou hífen).';
+const MSG_DATE = 'Data inválida. Use o formato AAAA-MM-DD.';
+
+const bad = (m) => new HttpsError('invalid-argument', m);
+
+function requireAdmin(request) {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Entre com seu e-mail e senha.');
+  if (request.auth.token.admin !== true) throw new HttpsError('permission-denied', 'Só o treinador pode atualizar as medalhas.');
+}
+
+function uidOf(data) {
+  const uid = data && typeof data === 'object' ? data.uid : null;
+  if (typeof uid !== 'string' || !uid || uid.includes('/')) throw bad('Aluno inválido.');
+  return uid;
+}
+
+// Data (AAAA-MM-DD) guardada como texto, sem fuso; padrão: hoje no horário de Brasília.
+function dateOf(v) {
+  if (v === undefined || v === null || v === '') return new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v) || new Date(v + 'T00:00:00Z').toISOString().slice(0, 10) !== v) throw bad(MSG_DATE);
+  return v;
+}
+
+const addressLine = (a) => `${a.street}, ${a.number}${a.complement ? ' (' + a.complement + ')' : ''} - ${a.district}, ${a.city}/${a.uf}, CEP ${a.cep}`;
+const brDate = (iso) => iso.split('-').reverse().join('/');
+
+// E-mail curto em pt-BR; sem dado de pagamento.
+function shippedEmail(name, order) {
+  const first = String(name || '').trim().split(/\s+/)[0] || 'atleta';
+  return {
+    subject: 'Sua medalha Letz bora! foi enviada',
+    text: [
+      `Oi, ${first}!`,
+      '',
+      'Sua medalha Letz bora! foi enviada.',
+      '',
+      `Código de rastreio: ${order.trackingCode}`,
+      `Data de envio: ${brDate(order.shippedAt)}`,
+      `Endereço de entrega: ${addressLine(order.address)}`,
+      '',
+      'Qualquer dúvida, é só chamar a assessoria da Letz pelo WhatsApp.',
+      '',
+      'Letz Assessoria',
+    ].join('\n'),
+  };
+}
+
+// Falha de e-mail nunca desfaz o status: vira log e alerta no painel.
+async function emailShipped(db, uid, order) {
+  let sent = false;
+  try {
+    const [user, authUser] = await Promise.all([db.doc('users/' + uid).get(), getAuth().getUser(uid)]);
+    if (!authUser.email) throw new Error('aluno sem e-mail');
+    const { subject, text } = shippedEmail(user.get('name'), order);
+    sent = (await sendMail({ to: authUser.email, subject, text })).sent === true;
+  } catch (err) {
+    logger.error('medalha: não montou o e-mail de envio', { uid, err: safeErr(err) });
+  }
+  if (sent) {
+    await db.doc(`users/${uid}/private/medal`).update({ emailedAt: FieldValue.serverTimestamp(), emailedCount: FieldValue.increment(1) });
+  } else {
+    logger.error('medalha: e-mail de envio não saiu', { uid });
+    await db.collection('alerts').add({ type: 'medal-email-failed', uid, at: FieldValue.serverTimestamp(), resolved: false });
+  }
+  return sent;
+}
+
+async function updateMedalOrder(request) {
+  requireAdmin(request);
+  const d = request.data && typeof request.data === 'object' ? request.data : {};
+  const uid = uidOf(d);
+  if (!['paid', 'shipped', 'delivered'].includes(d.status)) throw bad('Status inválido.');
+  const db = getFirestore();
+  const ref = db.doc(`users/${uid}/private/medal`);
+
+  const out = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new HttpsError('failed-precondition', 'Esse aluno não tem pedido de medalha.');
+    const cur = snap.data();
+    const editing = cur.status === d.status && d.status !== 'paid';
+    if (!editing && !(NEXT[cur.status] || []).includes(d.status)) {
+      throw new HttpsError('failed-precondition', 'Essa mudança de status não é permitida.');
+    }
+    const patch = { status: d.status, updatedAt: FieldValue.serverTimestamp() };
+    if (d.status === 'paid') {
+      Object.assign(patch, { trackingCode: FieldValue.delete(), shippedAt: FieldValue.delete(), deliveredAt: FieldValue.delete() });
+    } else {
+      // Ao entrar em "shipped" o rastreio vem na chamada; só edições e "delivered" reaproveitam o salvo.
+      const tracking = d.trackingCode !== undefined ? d.trackingCode : (cur.status === 'paid' ? undefined : cur.trackingCode);
+      if (typeof tracking !== 'string' || !TRACKING_RE.test(tracking)) throw bad(MSG_TRACKING);
+      patch.trackingCode = tracking;
+      patch.shippedAt = d.shippedAt !== undefined || !cur.shippedAt ? dateOf(d.shippedAt) : cur.shippedAt;
+      patch.deliveredAt = d.status === 'delivered' ? dateOf(d.deliveredAt) : FieldValue.delete();
+    }
+    tx.update(ref, patch);
+    // O e-mail automático sai uma vez, na primeira passagem para "shipped".
+    const first = d.status === 'shipped' && cur.status === 'paid' && !cur.emailedAt;
+    return { first, order: { ...cur, ...patch } };
+  });
+
+  const emailed = out.first ? await emailShipped(db, uid, out.order) : false;
+  return { ok: true, emailed };
+}
+
+async function resendMedalEmail(request) {
+  requireAdmin(request);
+  const uid = uidOf(request.data);
+  const db = getFirestore();
+  const snap = await db.doc(`users/${uid}/private/medal`).get();
+  const order = snap.exists ? snap.data() : null;
+  if (!order || !['shipped', 'delivered'].includes(order.status)) {
+    throw new HttpsError('failed-precondition', 'O e-mail só pode ser reenviado para medalha enviada ou entregue.');
+  }
+  return { ok: true, emailed: await emailShipped(db, uid, order) };
+}
+
+module.exports = { startMedalCheckout, updateMedalOrder, resendMedalEmail };

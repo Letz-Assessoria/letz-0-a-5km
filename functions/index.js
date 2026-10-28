@@ -23,6 +23,12 @@ exports.onConfigWritten = onDocumentWritten({ document: 'config/app', timeoutSec
 exports.signup = onCall({ secrets: [ASAAS_API_KEY] }, signup.signup);
 exports.resumeCheckout = onCall({ secrets: [ASAAS_API_KEY] }, signup.resumeCheckout);
 exports.startMedalCheckout = onCall({ secrets: [ASAAS_API_KEY] }, medal.startMedalCheckout);
+// E-mail de envio: o envio real precisa do secret GMAIL_APP_PASSWORD (billing-config.js). Ele ainda NÃO
+// está em `secrets` abaixo porque não foi criado (o deploy falharia); sem ele o mailer usa o transporte falso.
+// Para ligar: firebase functions:secrets:set GMAIL_APP_PASSWORD e acrescentar `secrets: [GMAIL_APP_PASSWORD]`
+// a updateMedalOrder e resendMedalEmail.
+exports.updateMedalOrder = onCall(medal.updateMedalOrder);
+exports.resendMedalEmail = onCall(medal.resendMedalEmail);
 exports.createPartner = onCall(partners.createPartner);
 exports.createCoupon = onCall(partners.createCoupon);
 exports.asaasWebhook = onRequest({ secrets: [ASAAS_WEBHOOK_TOKEN] }, webhook.asaasWebhook);

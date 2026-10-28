@@ -110,7 +110,7 @@ async function concluded(extra = {}) {
 }
 
 async function wipe() {
-  for (const c of ['users', 'posts', 'cpfs', 'checkouts', 'asaasEvents', 'config', 'rateLimits', 'testFaults', 'alerts', 'payments']) {
+  for (const c of ['users', 'posts', 'cpfs', 'checkouts', 'asaasEvents', 'config', 'rateLimits', 'testFaults', 'alerts', 'payments', 'testMail']) {
     await db.recursiveDelete(db.collection(c));
   }
   await fetch(`${AUTH}/emulator/v1/projects/${PROJECT}/accounts`, { method: 'DELETE' });
@@ -311,6 +311,150 @@ async function withOrder() {
   s.checkoutId = m.checkoutId;
   return s;
 }
+
+describe('medalha: envio (updateMedalOrder, resendMedalEmail)', () => {
+  before(async () => {
+    fake = await startFakeAsaas({ port: 7777 });
+  });
+  beforeEach(wipe);
+  after(async () => {
+    await wipe();
+    await fake.close();
+  });
+
+  const adminToken = async () => {
+    seq += 1;
+    const email = `treinador${seq}-${Date.now()}@exemplo.com`;
+    const u = await admin.auth().createUser({ email, password: 'senha-forte-123' });
+    await admin.auth().setCustomUserClaims(u.uid, { admin: true });
+    return signIn(email, 'senha-forte-123');
+  };
+  const orderOf = (uid) => get(`users/${uid}/private/medal`);
+  const mailN = async () => ((await db.doc('testMail/last').get()).get('n')) || 0;
+  const lastMail = async () => (await db.doc('testMail/last').get()).data();
+  // Aluno com pedido da medalha no status dado (semeado direto).
+  const withStatus = async (status, extra = {}) => {
+    const s = await withOrder();
+    await db.doc(`users/${s.uid}/private/medal`).update({ status, ...extra });
+    s.tr = await adminToken();
+    return s;
+  };
+  const upd = (s, data) => call('updateMedalOrder', { uid: s.uid, ...data }, s.tr);
+
+  it('só admin: aluno e anônimo recebem permission-denied/unauthenticated, nada muda', async () => {
+    const s = await withStatus('paid');
+    for (const fn of ['updateMedalOrder', 'resendMedalEmail']) {
+      const a = await call(fn, { uid: s.uid, status: 'shipped', trackingCode: 'AB123' }, s.token);
+      assert.equal(a.error.status, 'PERMISSION_DENIED');
+      const n = await call(fn, { uid: s.uid, status: 'shipped', trackingCode: 'AB123' });
+      assert.equal(n.error.status, 'UNAUTHENTICATED');
+    }
+    assert.equal((await orderOf(s.uid)).status, 'paid');
+    assert.equal(await mailN(), 0);
+  });
+
+  it('paid→shipped sem rastreio ou com rastreio/data inválidos: invalid-argument, nada muda', async () => {
+    const s = await withStatus('paid');
+    for (const extra of [{}, { trackingCode: 'ab' }, { trackingCode: 'AB 123' }, { trackingCode: 'A'.repeat(41) }, { trackingCode: 'AB123', shippedAt: '31/10/2026' }, { trackingCode: 'AB123', shippedAt: '2026-02-31' }]) {
+      assert.equal((await upd(s, { status: 'shipped', ...extra })).error.status, 'INVALID_ARGUMENT', JSON.stringify(extra));
+    }
+    assert.equal((await upd(s, { status: 'enviado' })).error.status, 'INVALID_ARGUMENT');
+    assert.equal((await orderOf(s.uid)).status, 'paid');
+    assert.equal(await mailN(), 0);
+  });
+
+  it('paid→shipped: grava rastreio e data, envia 1 e-mail com nome, rastreio, data e endereço, sem pagamento', async () => {
+    const s = await withStatus('paid');
+    const r = await upd(s, { status: 'shipped', trackingCode: 'BR123456789', shippedAt: '2026-11-03' });
+    assert.deepEqual(r.result, { ok: true, emailed: true });
+    const o = await orderOf(s.uid);
+    assert.equal(o.status, 'shipped');
+    assert.equal(o.trackingCode, 'BR123456789');
+    assert.equal(o.shippedAt, '2026-11-03');
+    assert.equal(o.emailedCount, 1);
+    assert.ok(o.emailedAt);
+    assert.equal(await mailN(), 1);
+    const m = await lastMail();
+    assert.equal(m.from, 'Letz Assessoria <letzassessoria@gmail.com>');
+    assert.equal(m.to, s.p.email);
+    assert.match(m.subject, /medalha/i);
+    const first = s.p.name.split(' ')[0];
+    for (const part of [first, 'BR123456789', '03/11/2026', 'Rua da Aurora, 100', 'Recife/PE', (await orderOf(s.uid)).address.cep]) assert.ok(m.text.includes(part), part);
+    assert.doesNotMatch(m.text, /R\$|35|pix|cart[aã]o|cpf|checkout/i);
+  });
+
+  it('sem shippedAt usa hoje; editar o rastreio de shipped não reenvia e-mail', async () => {
+    const s = await withStatus('paid');
+    await upd(s, { status: 'shipped', trackingCode: 'AAA111' });
+    assert.match((await orderOf(s.uid)).shippedAt, /^\d{4}-\d{2}-\d{2}$/);
+    const r = await upd(s, { status: 'shipped', trackingCode: 'BBB222' });
+    assert.deepEqual(r.result, { ok: true, emailed: false });
+    assert.equal((await orderOf(s.uid)).trackingCode, 'BBB222');
+    assert.equal(await mailN(), 1);
+  });
+
+  it('shipped→delivered grava a data; delivered→shipped e shipped→paid voltam sem e-mail e sem reenvio ao reenviar', async () => {
+    const s = await withStatus('paid');
+    await upd(s, { status: 'shipped', trackingCode: 'AAA111', shippedAt: '2026-11-03' });
+    assert.deepEqual((await upd(s, { status: 'delivered', deliveredAt: '2026-11-09' })).result, { ok: true, emailed: false });
+    let o = await orderOf(s.uid);
+    assert.deepEqual([o.status, o.deliveredAt, o.trackingCode], ['delivered', '2026-11-09', 'AAA111']);
+    assert.equal((await upd(s, { status: 'shipped' })).result.emailed, false);
+    o = await orderOf(s.uid);
+    assert.deepEqual([o.status, o.deliveredAt, o.trackingCode], ['shipped', undefined, 'AAA111']);
+    assert.equal((await upd(s, { status: 'paid' })).result.emailed, false);
+    o = await orderOf(s.uid);
+    assert.deepEqual([o.status, o.trackingCode, o.shippedAt], ['paid', undefined, undefined]);
+    // Segunda passagem para shipped: o e-mail já saiu uma vez, não repete.
+    assert.equal((await upd(s, { status: 'shipped', trackingCode: 'CCC333' })).result.emailed, false);
+    assert.equal(await mailN(), 1);
+  });
+
+  it('transições inválidas: failed-precondition', async () => {
+    for (const [from, to] of [['pending', 'shipped'], ['pending', 'paid'], ['refunded', 'delivered'], ['refunded', 'shipped'], ['paid', 'delivered'], ['delivered', 'paid'], ['paid', 'paid']]) {
+      const s = await withStatus(from, { trackingCode: 'AAA111', shippedAt: '2026-11-03' });
+      const r = await upd(s, { status: to, trackingCode: 'AAA111' });
+      assert.equal(r.error && r.error.status, 'FAILED_PRECONDITION', `${from}→${to}`);
+      assert.equal((await orderOf(s.uid)).status, from);
+    }
+    const s = await withStatus('paid');
+    await db.doc(`users/${s.uid}/private/medal`).delete();
+    assert.equal((await upd(s, { status: 'shipped', trackingCode: 'AAA111' })).error.status, 'FAILED_PRECONDITION');
+    assert.equal(await mailN(), 0);
+  });
+
+  it('falha do e-mail: o status muda mesmo assim, emailed:false e alerta medal-email-failed', async () => {
+    const s = await withStatus('paid');
+    await db.doc('testFaults/mail').set({ fail: true });
+    const r = await upd(s, { status: 'shipped', trackingCode: 'AAA111' });
+    assert.deepEqual(r.result, { ok: true, emailed: false });
+    const o = await orderOf(s.uid);
+    assert.equal(o.status, 'shipped');
+    assert.equal(o.emailedAt, undefined);
+    assert.equal(await mailN(), 0);
+    const alerts = (await db.collection('alerts').get()).docs.map((d) => d.data());
+    assert.deepEqual(alerts.map((a) => [a.type, a.uid, a.resolved]), [['medal-email-failed', s.uid, false]]);
+    // Reenviar depois que o problema passou: sai e registra.
+    await db.doc('testFaults/mail').delete();
+    assert.deepEqual((await call('resendMedalEmail', { uid: s.uid }, s.tr)).result, { ok: true, emailed: true });
+    assert.equal((await orderOf(s.uid)).emailedCount, 1);
+  });
+
+  it('resendMedalEmail: só shipped/delivered; reenvia e conta', async () => {
+    for (const st of ['pending', 'paid', 'refunded']) {
+      const s = await withStatus(st);
+      assert.equal((await call('resendMedalEmail', { uid: s.uid }, s.tr)).error.status, 'FAILED_PRECONDITION', st);
+    }
+    const s = await withStatus('paid');
+    await upd(s, { status: 'shipped', trackingCode: 'AAA111', shippedAt: '2026-11-03' });
+    assert.deepEqual((await call('resendMedalEmail', { uid: s.uid }, s.tr)).result, { ok: true, emailed: true });
+    assert.equal((await orderOf(s.uid)).emailedCount, 2);
+    assert.equal(await mailN(), 2);
+    await upd(s, { status: 'delivered' });
+    assert.equal((await call('resendMedalEmail', { uid: s.uid }, s.tr)).result.emailed, true);
+    assert.equal((await call('resendMedalEmail', {}, s.tr)).error.status, 'INVALID_ARGUMENT');
+  });
+});
 
 describe('medalha: webhook', () => {
   before(async () => {
