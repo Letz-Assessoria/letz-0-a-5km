@@ -16,6 +16,9 @@ const MSG_SALES_CLOSED = 'As vendas desta turma estão fechadas.';
 const MSG_RATE = 'Muitas tentativas. Tente de novo em alguns minutos.';
 const MSG_PAID = 'O pagamento já foi feito.';
 const MSG_CLOSED = 'Este cadastro foi encerrado. Fale com a Letz.';
+// Uma só mensagem para cupom inexistente, inativo, vencido ou esgotado: não revela qual.
+const MSG_COUPON = 'Cupom inválido ou esgotado.';
+const COUPON_RE = /^[A-Z0-9]{4,20}$/;
 
 const HOUR_MS = 3600e3;
 // Reserva órfã (função caiu entre reservar o CPF e gravar a conta): retomável
@@ -45,10 +48,20 @@ function validate(data) {
   const cpf = core.normalizeCpf(d.cpf);
   const phone = typeof d.phone === 'string' ? core.normalizePhone(d.phone) : null;
   if (!phone) throw bad('Informe um celular com DDD.');
-  const address = core.cleanAddress(d.address);
-  if (!address) throw bad('Confira o endereço: CEP, rua, número, bairro, cidade e estado.');
+  let coupon = null;
+  if (d.coupon !== undefined && d.coupon !== null && d.coupon !== '') {
+    if (typeof d.coupon !== 'string') throw bad(MSG_COUPON);
+    coupon = d.coupon.trim().toUpperCase();
+    if (coupon && !COUPON_RE.test(coupon)) throw bad(MSG_COUPON);
+    coupon = coupon || null;
+  }
+  // Com cupom o endereço é opcional (não há checkout); se vier, tem que estar certo.
+  const hasAddr = d.address && typeof d.address === 'object' && Object.values(d.address).some((v) => String(v || '').trim());
+  const address = coupon && !hasAddr ? null : core.cleanAddress(d.address);
+  if (!address && !coupon) throw bad('Confira o endereço: CEP, rua, número, bairro, cidade e estado.');
+  if (coupon && hasAddr && !address) throw bad('Confira o endereço: CEP, rua, número, bairro, cidade e estado.');
   if (d.acceptPolicy !== true) throw bad('É preciso aceitar a política de privacidade.');
-  return { name, email, password, cpf, phone, address };
+  return { name, email, password, cpf, phone, address, coupon };
 }
 
 // Falhas injetáveis só no emulador (testes): testFaults/{name}.
@@ -59,6 +72,15 @@ async function faultValue(db, name, field) {
 }
 async function fault(db, name, flag) {
   return (await faultValue(db, name, flag)) === true;
+}
+
+// Cupom utilizável: existe, ativo, não vencido e com usos sobrando.
+function couponUsable(snap) {
+  if (!snap.exists) return false;
+  if (snap.get('active') !== true) return false;
+  const exp = snap.get('expiresAt');
+  if (exp && exp.toMillis() <= Date.now()) return false;
+  return (snap.get('usedCount') || 0) < (snap.get('maxUses') || 0);
 }
 
 // Conta que perdeu o CPF (ou está perdendo) não paga nem abre checkout.
@@ -319,7 +341,7 @@ async function openCheckout(db, uid) {
 }
 
 async function signup(request) {
-  const { name, email, password, cpf, phone, address } = validate(request.data);
+  const { name, email, password, cpf, phone, address, coupon } = validate(request.data);
   const db = getFirestore();
   await rateLimit(db, request);
 
@@ -339,6 +361,10 @@ async function signup(request) {
       throw new HttpsError('internal', 'Não foi possível criar a conta. Tente de novo.');
     }
   }
+
+  // Confere o cupom cedo (leitura simples) para não criar/apagar conta à toa.
+  // A validação que vale é a da transação que grava a conta.
+  if (coupon && !couponUsable((await db.doc('coupons/' + coupon).get()))) throw new HttpsError('failed-precondition', MSG_COUPON);
 
   const uid = db.collection('users').doc().id;
   const reservation = await reserveCpf(db, cpf, uid);
@@ -366,23 +392,50 @@ async function signup(request) {
   }
 
   const now = FieldValue.serverTimestamp();
-  const batch = db.batch();
-  batch.set(db.doc('users/' + uid), {
+  const userDoc = {
     name, handle: '', photoURL: '', profiled: false, welcomed: false,
-    access: 'pending', points: 0, done: 0, createdAt: now,
-  });
-  batch.set(db.doc(`users/${uid}/private/profile`), { email, cpf, phone, address, policyAcceptedAt: now });
-  batch.set(db.doc(`users/${uid}/private/billing`), {
-    checkoutId: null, url: null, expiresAt: null, status: 'pending', updatedAt: now,
-  });
+    access: coupon ? 'active' : 'pending', points: 0, done: 0, createdAt: now,
+  };
+  const profileDoc = { email, cpf, phone, policyAcceptedAt: now };
+  if (address) profileDoc.address = address;
   try {
     if (await fault(db, 'signup', 'failBatch')) throw new Error('falha simulada no batch');
-    await batch.commit();
+    if (coupon) {
+      // Resgate e conta na mesma transação: ou tudo, ou nada (e o cupom não é consumido).
+      const couponRef = db.doc('coupons/' + coupon);
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(couponRef);
+        if (!couponUsable(snap)) throw new HttpsError('failed-precondition', MSG_COUPON);
+        tx.update(couponRef, { usedCount: FieldValue.increment(1) });
+        tx.create(db.doc(`coupons/${coupon}/uses/${uid}`), { name, at: now });
+        tx.create(db.doc('users/' + uid), userDoc);
+        tx.create(db.doc(`users/${uid}/private/profile`), profileDoc);
+        tx.create(db.doc(`users/${uid}/private/billing`), {
+          status: 'courtesy', coupon, partnerUid: snap.get('partnerUid') || null, updatedAt: now,
+        });
+      });
+    } else {
+      const batch = db.batch();
+      batch.set(db.doc('users/' + uid), userDoc);
+      batch.set(db.doc(`users/${uid}/private/profile`), profileDoc);
+      batch.set(db.doc(`users/${uid}/private/billing`), {
+        checkoutId: null, url: null, expiresAt: null, status: 'pending', updatedAt: now,
+      });
+      await batch.commit();
+    }
   } catch (err) {
-    logger.error('signup: não gravou a conta; desfazendo', { uid, err: safeErr(err) });
+    const couponErr = err instanceof HttpsError;
+    if (!couponErr) logger.error('signup: não gravou a conta; desfazendo', { uid, err: safeErr(err) });
     await deleteAuthUser(uid);
     await undoCpf();
+    if (couponErr) throw err;
     throw new HttpsError('internal', 'Não foi possível criar a conta. Tente de novo.');
+  }
+
+  if (coupon) {
+    await finishReclaim(db, cpf, uid, reservation);
+    await noteSignupSuccess(db);
+    return { checkoutUrl: null, courtesy: true };
   }
 
   await finishReclaim(db, cpf, uid, reservation);
