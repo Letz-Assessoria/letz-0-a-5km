@@ -990,7 +990,7 @@ function vMedalha(){var m=S.medal,body;
  else body='<div class="card stack"><p><b>Você ainda não tem uma medalha paga.</b></p><p class="muted">Se você acabou de pagar, aguarde alguns instantes. Se não, peça a sua medalha na tela de conclusão.</p></div>';
  return header('Do 0 aos 5 km')+'<div class="stack" style="gap:6px"><span class="label">Medalha Letz bora!</span><h1 class="disp" style="font-size:clamp(44px,13vw,72px)">'+(medalPaid()?'Sua<br>medalha':'Quase<br>lá')+'</h1></div>'+body+'<button class="btn line wide" data-act="to-fim">Voltar ao app</button>';}
 function fmtCpf(v){v=v.replace(/\D/g,'').slice(0,11);return v.length>9?v.slice(0,3)+'.'+v.slice(3,6)+'.'+v.slice(6,9)+'-'+v.slice(9):v.length>6?v.slice(0,3)+'.'+v.slice(3,6)+'.'+v.slice(6):v.length>3?v.slice(0,3)+'.'+v.slice(3):v;}
-function fmtPhone(v){v=v.replace(/\D/g,'').slice(0,11);if(v.length<3)return v.length?'('+v:v;var d='('+v.slice(0,2)+') ',r=v.slice(2);return d+(r.length>(v.length===11?5:4)?r.slice(0,v.length===11?5:4)+'-'+r.slice(v.length===11?5:4):r);}
+function fmtPhone(v){v=LetzCore.stripCountry(v.replace(/\D/g,'').slice(0,13)).slice(0,11);if(v.length<3)return v.length?'('+v:v;var d='('+v.slice(0,2)+') ',r=v.slice(2);return d+(r.length>(v.length===11?5:4)?r.slice(0,v.length===11?5:4)+'-'+r.slice(v.length===11?5:4):r);}
 function fmtCep(v){v=v.replace(/\D/g,'').slice(0,8);return v.length>5?v.slice(0,5)+'-'+v.slice(5):v;}
 /* busca o CEP no ViaCEP para o endereço g (cadastro: V.sg, medalha: V.mo.d); p é o prefixo dos campos e alive() diz se g ainda é o rascunho atual */
 function lookupAddrCep(g,p,alive,c){var msg=document.getElementById(p+'-cep-msg'),say=function(t){g.cepMsg=t;if(msg)msg.textContent=t;},

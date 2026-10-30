@@ -46,6 +46,11 @@ test('CPF', () => {
 test('normalizePhone', () => {
   assert.equal(normalizePhone('(87) 98190-8719'), '87981908719');
   assert.equal(normalizePhone('1234'), null);
+  assert.equal(normalizePhone('+55 (87) 98190-8719'), '87981908719');
+  assert.equal(normalizePhone('5587981908719'), '87981908719');
+  assert.equal(normalizePhone('55879813137'), null);
+  assert.equal(normalizePhone('(81) 3333-4444'), '8133334444');
+  assert.equal(normalizePhone('0187981908719'), null);
 });
 test('cleanHandle', () => {
   assert.equal(cleanHandle('@@Fe.Lipe!x'), 'fe.lipex');

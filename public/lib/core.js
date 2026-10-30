@@ -45,8 +45,16 @@
   }
 
   function normalizePhone(s) {
-    var d = String(s == null ? '' : s).replace(/\D/g, '');
-    return d.length === 10 || d.length === 11 ? d : null;
+    var d = stripCountry(String(s == null ? '' : s).replace(/\D/g, ''));
+    if (d.length !== 10 && d.length !== 11) return null;
+    // DDD de 11 a 99; celular (11 dígitos) começa com 9, fixo (10) com 2 a 5
+    if (!/^[1-9][1-9]/.test(d)) return null;
+    return d[2] === '9' ? (d.length === 11 ? d : null) : (d.length === 10 && /[2-5]/.test(d[2]) ? d : null);
+  }
+
+  // Tira o +55 de quem digitou ou colou o número com código do país (12 ou 13 dígitos)
+  function stripCountry(d) {
+    return (d.length === 12 || d.length === 13) && d.slice(0, 2) === '55' ? d.slice(2) : d;
   }
 
   function normalizeCep(s) {
@@ -83,6 +91,6 @@
     WEEK_MS: WEEK_MS, DEFAULT_START_ISO: DEFAULT_START_ISO,
     weekOpen: weekOpen, weekIndex: weekIndex, pointedKeys: pointedKeys, pointsFor: pointsFor,
     isConcluded: isConcluded, isValidCpf: isValidCpf, normalizeCpf: normalizeCpf,
-    normalizePhone: normalizePhone, normalizeCep: normalizeCep, cleanAddress: cleanAddress, cleanHandle: cleanHandle
+    normalizePhone: normalizePhone, stripCountry: stripCountry, normalizeCep: normalizeCep, cleanAddress: cleanAddress, cleanHandle: cleanHandle
   };
 });
