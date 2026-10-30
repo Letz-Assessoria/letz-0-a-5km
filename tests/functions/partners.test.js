@@ -116,7 +116,7 @@ describe('parceiros e cupons', () => {
       assert.equal(r.error, undefined, JSON.stringify(r.error));
       assert.equal(r.result.code, 'MARIA20');
       assert.match(r.result.resetLink, /^https?:\/\//);
-      assert.match(r.result.resetLink, /oobCode=/);
+      assert.match(r.result.resetLink, /#\/redefinir\/[A-Za-z0-9_-]{40,}$/);
       const user = await admin.auth().getUserByEmail(d.email);
       assert.equal(user.uid, r.result.uid);
       const u = await get('users/' + user.uid);

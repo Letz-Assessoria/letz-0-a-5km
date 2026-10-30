@@ -71,7 +71,7 @@ test('treinador cria parceiro com 5%, aluno paga com desconto e o painel mostra 
   const res = page.locator('[data-pfres]');
   await expect(res).toContainText('Parceiro criado');
   const link = await res.getByLabel('Link de criação de senha').inputValue();
-  expect(link).toMatch(/oobCode=/);
+  expect(link).toMatch(/#\/redefinir\/[A-Za-z0-9_-]{40,}$/);
   const card = page.locator('[data-partner]', { hasText: name });
   await expect(card).toContainText(code);
   await expect(card).toContainText('5% de desconto');

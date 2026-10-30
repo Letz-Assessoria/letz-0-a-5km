@@ -2,7 +2,7 @@
 // retomada do pagamento. Expõe window.LetzFB e dispara 'letzfb-ready' no document.
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js';
 import {
-  getAuth, connectAuthEmulator, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail,
+  getAuth, connectAuthEmulator, onAuthStateChanged, signInWithEmailAndPassword, signOut,
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
 import {
   getFirestore, connectFirestoreEmulator, doc, collection, onSnapshot, getDoc, getDocs, setDoc, updateDoc, deleteDoc, addDoc,
@@ -97,8 +97,20 @@ function logout() {
   return signOut(auth);
 }
 
-function resetPassword(email) {
-  return sendPasswordResetEmail(auth, String(email || '').trim());
+// Senha nova por link da Letz (callables públicos; o e-mail sai do servidor).
+const callRequestReset = httpsCallable(functions, 'requestPasswordReset');
+const callResetWithToken = httpsCallable(functions, 'resetPasswordWithToken');
+const callAccessLink = httpsCallable(functions, 'createAccessLink');
+async function resetPassword(email) {
+  await callRequestReset({ email: String(email || '').trim() });
+}
+async function resetPasswordWithToken(token, password) {
+  const r = await callResetWithToken({ token, password });
+  return { email: r.data.email };
+}
+async function accessLink(uid) {
+  const r = await callAccessLink({ uid });
+  return { resetLink: r.data.resetLink };
 }
 
 async function resumeCheckout() {
@@ -680,7 +692,7 @@ async function setCommentHidden(postId, cid, hidden) {
 }
 window.LetzFB = {
   app, auth, db, functions, storage,
-  onSession, signup, login, logout, resetPassword, resumeCheckout, errorMessage,
+  onSession, signup, login, logout, resetPassword, resetPasswordWithToken, accessLink, resumeCheckout, errorMessage,
   saveProfile, markWelcomed, markWorkout, unmarkWorkout, setWorkoutContent, clearWorkoutContent,
   watchMyPosts, watchFeed, loadMoreFeed, watchRanking, watchConfig,
   loadMyReactions, toggleReaction, addComment, deleteComment, watchComments,
