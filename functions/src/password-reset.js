@@ -14,14 +14,22 @@ const { safeErr } = require('./safe.js');
 const SELF_TTL_MS = 2 * 3600e3; // link pedido pelo próprio aluno
 const ADMIN_TTL_MS = 7 * 24 * 3600e3; // link que o treinador manda a um parceiro
 const COOLDOWN_MS = 60e3;
+const MIN_REPLY_MS = 1500;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MSG_BAD_LINK = 'Este link venceu ou já foi usado. Peça um novo.';
 
 const hashOf = (token) => crypto.createHash('sha256').update(token).digest('hex');
 const bad = (m) => new HttpsError('invalid-argument', m);
 
+// Só um link vale por conta: emitir outro, ou trocar a senha, apaga os que ainda estavam abertos.
+async function dropOpenLinks(uid) {
+  const open = await getFirestore().collection('passwordResets').where('uid', '==', uid).get();
+  await Promise.all(open.docs.map((d) => d.ref.delete()));
+}
+
 async function issueLink(uid, email, ttlMs) {
   const token = crypto.randomBytes(32).toString('base64url');
+  await dropOpenLinks(uid);
   await getFirestore().doc('passwordResets/' + hashOf(token)).set({
     uid, email, expiresAt: Timestamp.fromMillis(Date.now() + ttlMs), createdAt: FieldValue.serverTimestamp(),
   });
@@ -30,6 +38,15 @@ async function issueLink(uid, email, ttlMs) {
 
 // Público. Sempre responde { ok: true }, exista a conta ou não, para não revelar quem tem cadastro.
 async function requestPasswordReset(request) {
+  const t0 = Date.now();
+  const res = await requestPasswordResetInner(request);
+  // Mesma demora com ou sem conta, para o tempo da resposta não revelar quem tem cadastro.
+  const wait = MIN_REPLY_MS - (Date.now() - t0);
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  return res;
+}
+
+async function requestPasswordResetInner(request) {
   const email = request.data && typeof request.data.email === 'string' ? request.data.email.trim().toLowerCase() : '';
   if (!EMAIL_RE.test(email) || email.length > 254) throw bad('Informe um e-mail válido.');
   try {
@@ -84,14 +101,21 @@ async function resetPasswordWithToken(request) {
     return s.data();
   });
   if (!row) throw new HttpsError('failed-precondition', MSG_BAD_LINK);
+  const auth = getAuth();
   try {
-    await getAuth().updateUser(row.uid, { password });
-    await getAuth().revokeRefreshTokens(row.uid);
+    const current = await auth.getUser(row.uid);
+    if ((current.email || '').toLowerCase() !== String(row.email).toLowerCase()) throw new Error('e-mail da conta mudou');
+    await auth.updateUser(row.uid, { password });
   } catch (err) {
     logger.error('resetPasswordWithToken: não trocou a senha', { uid: row.uid, err: safeErr(err) });
     await ref.update({ usedAt: FieldValue.delete() }).catch(() => {});
-    throw new HttpsError('internal', 'Não foi possível trocar a senha. Tente de novo.');
+    throw new HttpsError('failed-precondition', MSG_BAD_LINK);
   }
+  // Daqui em diante a senha já mudou: o link fica gasto, aconteça o que acontecer.
+  await Promise.all([
+    auth.revokeRefreshTokens(row.uid),
+    dropOpenLinks(row.uid),
+  ]).catch((err) => logger.error('resetPasswordWithToken: limpeza pós-troca falhou', { uid: row.uid, err: safeErr(err) }));
   return { email: row.email };
 }
 
