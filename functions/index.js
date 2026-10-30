@@ -35,4 +35,6 @@ exports.createAccessLink = onCall(passwordReset.createAccessLink);
 exports.resetPasswordWithToken = onCall(passwordReset.resetPasswordWithToken);
 exports.createPartner = onCall(partners.createPartner);
 exports.createCoupon = onCall(partners.createCoupon);
+exports.renameCoupon = onCall(partners.renameCoupon);
+exports.deleteCoupon = onCall(partners.deleteCoupon);
 exports.asaasWebhook = onRequest({ secrets: [ASAAS_WEBHOOK_TOKEN] }, webhook.asaasWebhook);
