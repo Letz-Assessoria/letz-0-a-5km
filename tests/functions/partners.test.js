@@ -380,4 +380,54 @@ describe('parceiros e cupons', () => {
       assert.equal((await get('payments/' + b.checkoutId)).coupon, undefined);
     });
   });
+  describe('renameCoupon e deleteCoupon', () => {
+    it('renomear leva usos, billing e checkout para o código novo e apaga o antigo', async () => {
+      const token = await makeUserToken(true);
+      const pr = await call('createPartner', partnerData({ code: 'ANTIGO01' }), token);
+      const p = person({ coupon: 'ANTIGO01' });
+      assert.equal((await call('signup', p)).error, undefined);
+      const u = await admin.auth().getUserByEmail(p.email);
+      const bill = await get(`users/${u.uid}/private/billing`);
+      assert.equal(bill.coupon, 'ANTIGO01');
+      const r = await call('renameCoupon', { code: 'antigo01', newCode: 'novo0002' }, token);
+      assert.equal(r.error, undefined, JSON.stringify(r.error));
+      assert.equal((await db.doc('coupons/ANTIGO01').get()).exists, false);
+      const c = await get('coupons/NOVO0002');
+      assert.equal(c.code, 'NOVO0002');
+      assert.equal(c.partnerUid, pr.result.uid);
+      assert.equal(c.usedCount, 1);
+      assert.equal((await get(`coupons/NOVO0002/uses/${u.uid}`)).partnerUid, pr.result.uid);
+      assert.equal((await db.doc(`coupons/ANTIGO01/uses/${u.uid}`).get()).exists, false);
+      assert.equal((await get(`users/${u.uid}/private/billing`)).coupon, 'NOVO0002');
+      const cks = (await db.collection('checkouts').where('coupon', '==', 'NOVO0002').get()).size;
+      assert.equal(cks, 1);
+      assert.equal((await db.collection('checkouts').where('coupon', '==', 'ANTIGO01').get()).size, 0);
+    });
+
+    it('renomear recusa código existente, inválido, inexistente e quem não é treinador', async () => {
+      const token = await makeUserToken(true);
+      await call('createPartner', partnerData({ code: 'UM000001' }), token);
+      await call('createPartner', partnerData({ code: 'DOIS0002' }), token);
+      assert.equal((await call('renameCoupon', { code: 'UM000001', newCode: 'DOIS0002' }, token)).error.status, 'ALREADY_EXISTS');
+      assert.equal((await call('renameCoupon', { code: 'UM000001', newCode: 'ab' }, token)).error.status, 'INVALID_ARGUMENT');
+      assert.equal((await call('renameCoupon', { code: 'NAOEXISTE', newCode: 'OUTRO003' }, token)).error.status, 'NOT_FOUND');
+      assert.equal((await call('renameCoupon', { code: 'UM000001', newCode: 'OUTRO003' }, await makeUserToken(false))).error.status, 'PERMISSION_DENIED');
+      assert.equal((await db.doc('coupons/UM000001').get()).exists, true);
+    });
+
+    it('excluir apaga cupom sem uso; com cadastro recusa; só treinador', async () => {
+      const token = await makeUserToken(true);
+      const lv = await call('createPartner', partnerData({ code: 'LIVRE001' }), token);
+      await call('createPartner', partnerData({ code: 'USADO001' }), token);
+      assert.equal((await call('deleteCoupon', { code: 'LIVRE001' }, token)).error.status, 'FAILED_PRECONDITION'); // único do parceiro
+      assert.equal((await call('createCoupon', { partnerUid: lv.result.uid, code: 'EXTRA001' }, token)).error, undefined);
+      assert.equal((await call('signup', person({ coupon: 'USADO001' }))).error, undefined);
+      assert.equal((await call('deleteCoupon', { code: 'LIVRE001' }, await makeUserToken(false))).error.status, 'PERMISSION_DENIED');
+      assert.equal((await call('deleteCoupon', { code: 'USADO001' }, token)).error.status, 'FAILED_PRECONDITION');
+      assert.equal((await db.doc('coupons/USADO001').get()).exists, true);
+      assert.equal((await call('deleteCoupon', { code: 'LIVRE001' }, token)).error, undefined);
+      assert.equal((await db.doc('coupons/LIVRE001').get()).exists, false);
+      assert.equal((await call('deleteCoupon', { code: 'LIVRE001' }, token)).error.status, 'NOT_FOUND');
+    });
+  });
 });

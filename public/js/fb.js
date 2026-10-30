@@ -633,6 +633,23 @@ async function createPartner(data) {
   const r = await callCreatePartner(data);
   return { uid: r.data.uid, code: r.data.code, resetLink: r.data.resetLink };
 }
+const callRenameCoupon = httpsCallable(functions, 'renameCoupon');
+const callDeleteCoupon = httpsCallable(functions, 'deleteCoupon');
+async function renameCoupon(code, newCode) {
+  await callRenameCoupon({ code, newCode });
+}
+async function deleteCoupon(code) {
+  await callDeleteCoupon({ code });
+}
+async function setCouponExpiry(code, day) {
+  // Data em branco = sem validade; vale até o fim do dia, no horário de Brasília.
+  let t = null;
+  if (day) {
+    t = Date.parse(day + 'T23:59:59-03:00');
+    if (Number.isNaN(t) || t <= Date.now()) throw new Error('validade inválida');
+  }
+  await updateDoc(doc(db, 'coupons', String(code)), { expiresAt: t === null ? null : Timestamp.fromMillis(t) });
+}
 async function createCoupon(data) {
   const r = await callCreateCoupon(data);
   return { code: r.data.code };
@@ -698,6 +715,6 @@ window.LetzFB = {
   loadMyReactions, toggleReaction, addComment, deleteComment, watchComments,
   postMedal, watchMyMedalPost,
   startMedalCheckout, requestRefund, rebuyProgram, loadSignupAddress, watchMedal, watchBilling,
-  saveConfig, listAthletes, listMedalOrders, updateMedalOrder, resendMedalEmail, listAlerts, listPayments, resolveAlert, createPartner, createCoupon, listCoupons, listCouponUses, setCouponActive, setCouponMax, setCouponPercent, setAccess, setPostHidden, setCommentHidden,
+  saveConfig, listAthletes, listMedalOrders, updateMedalOrder, resendMedalEmail, listAlerts, listPayments, resolveAlert, createPartner, createCoupon, renameCoupon, deleteCoupon, setCouponExpiry, listCoupons, listCouponUses, setCouponActive, setCouponMax, setCouponPercent, setAccess, setPostHidden, setCommentHidden,
 };
 document.dispatchEvent(new Event('letzfb-ready'));

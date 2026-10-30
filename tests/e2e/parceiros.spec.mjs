@@ -214,3 +214,41 @@ test('painel conta conversões de hoje, dos últimos 7 dias e total pela data de
   await expect(rows.nth(0)).toContainText('Pessoa u1');
   await expect(card.locator(`table[data-uses="${code}"]`)).toContainText('Cadastrou');
 });
+
+test('treinador renomeia, muda a validade e exclui cupom no card do parceiro', async ({ page, browser }) => {
+  const code = 'GERE' + Date.now().toString().slice(-6);
+  const novo = 'NOVO' + Date.now().toString().slice(-6);
+  await openPartners(page);
+  const name = await createPartnerOnPanel(page, code);
+  const card = page.locator('[data-partner]', { hasText: name });
+  const row = card.locator(`[data-coupon="${code}"]`);
+  await expect(row).toBeVisible();
+  await expect(row).toContainText('Único cupom do parceiro');
+  const partnerUid = (await db.doc('coupons/' + code).get()).data().partnerUid;
+  await db.doc('coupons/EXTRA' + code.slice(4)).set({ ...(await db.doc('coupons/' + code).get()).data(), code: 'EXTRA' + code.slice(4) });
+  await expect(row.getByRole('button', { name: 'Excluir' })).toBeVisible();
+
+  // validade
+  const day = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
+  await row.getByLabel(/Validade/).fill(day);
+  await waitUntil(async () => (await db.doc('coupons/' + code).get()).data().expiresAt !== null);
+  await expect(row).toContainText('até ');
+
+  // renomear
+  await row.getByRole('button', { name: 'Renomear' }).click();
+  await card.getByLabel('Novo código do cupom').fill(novo.toLowerCase());
+  await card.getByRole('button', { name: 'Salvar' }).click();
+  await expect(card.locator(`[data-coupon="${novo}"]`)).toBeVisible();
+  expect((await db.doc('coupons/' + code).get()).exists).toBe(false);
+  expect((await db.doc('coupons/' + novo).get()).data().expiresAt).not.toBeNull();
+
+  // excluir (sem cadastros), com confirmação
+  const row2 = card.locator(`[data-coupon="${novo}"]`);
+  await row2.getByRole('button', { name: 'Excluir' }).click();
+  await row2.getByRole('button', { name: 'Não' }).click();
+  expect((await db.doc('coupons/' + novo).get()).exists).toBe(true);
+  await row2.getByRole('button', { name: 'Excluir' }).click();
+  await row2.getByRole('button', { name: 'Sim, excluir' }).click();
+  await waitUntil(async () => !(await db.doc('coupons/' + novo).get()).exists);
+  await expect(page.locator(`[data-coupon="${novo}"]`)).toHaveCount(0);
+});

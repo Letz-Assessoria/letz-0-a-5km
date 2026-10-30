@@ -133,4 +133,77 @@ async function createCoupon(request) {
   return { code: fields.code };
 }
 
-module.exports = { createPartner, createCoupon, validate };
+function adminOnly(request, what) {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Entre com seu e-mail e senha.');
+  if (request.auth.token.admin !== true) throw new HttpsError('permission-denied', `Só o treinador pode ${what}.`);
+}
+function codeArg(v, label) {
+  const code = typeof v === 'string' ? v.trim().toUpperCase() : '';
+  if (!COUPON_RE.test(code)) throw bad(label);
+  return code;
+}
+
+// Troca o código do cupom (ele é o id do documento): cria o novo com os mesmos dados e usos,
+// aponta para o novo código quem já se cadastrou (billing, checkouts, payments) e só então apaga o antigo.
+async function renameCoupon(request) {
+  adminOnly(request, 'renomear cupons');
+  const old = codeArg(request.data && request.data.code, 'Cupom inválido.');
+  const next = codeArg(request.data && request.data.newCode, 'O código do cupom precisa ter de 4 a 20 letras ou números.');
+  if (old === next) return { code: next };
+  const db = getFirestore();
+  const oldRef = db.doc('coupons/' + old);
+  const oldSnap = await oldRef.get();
+  if (!oldSnap.exists) throw new HttpsError('not-found', 'Cupom não encontrado.');
+  const newRef = db.doc('coupons/' + next);
+  try {
+    await newRef.create({ ...oldSnap.data(), code: next });
+  } catch (err) {
+    if (err && (err.code === 6 || err.code === 'already-exists')) throw new HttpsError('already-exists', MSG_CODE_EXISTS);
+    throw err;
+  }
+  try {
+    const uses = await oldRef.collection('uses').get();
+    const writes = [];
+    for (const u of uses.docs) {
+      writes.push((b) => b.set(newRef.collection('uses').doc(u.id), u.data()));
+      writes.push((b) => b.set(db.doc(`users/${u.id}/private/billing`), { coupon: next }, { merge: true }));
+    }
+    for (const col of ['checkouts', 'payments']) {
+      const refs = await db.collection(col).where('coupon', '==', old).get();
+      for (const r of refs.docs) writes.push((b) => b.update(r.ref, { coupon: next }));
+    }
+    for (let i = 0; i < writes.length; i += 400) {
+      const batch = db.batch();
+      writes.slice(i, i + 400).forEach((w) => w(batch));
+      await batch.commit();
+    }
+    await db.recursiveDelete(oldRef);
+  } catch (err) {
+    logger.error('renameCoupon: falhou no meio; desfazendo o novo', { old, next, err: safeErr(err) });
+    await db.recursiveDelete(newRef).catch(() => {});
+    throw new HttpsError('internal', 'Não foi possível renomear o cupom. Tente de novo.');
+  }
+  return { code: next };
+}
+
+// Só apaga cupom que ninguém usou; com cadastros, o histórico de conversão ficaria sem origem.
+async function deleteCoupon(request) {
+  adminOnly(request, 'excluir cupons');
+  const code = codeArg(request.data && request.data.code, 'Cupom inválido.');
+  const db = getFirestore();
+  const ref = db.doc('coupons/' + code);
+  await db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    if (!s.exists) throw new HttpsError('not-found', 'Cupom não encontrado.');
+    if ((s.get('usedCount') || 0) > 0 || !(await tx.get(ref.collection('uses').limit(1))).empty) {
+      throw new HttpsError('failed-precondition', 'Este cupom já tem cadastros. Desative em vez de excluir, para não perder o histórico.');
+    }
+    // O parceiro só aparece no painel pelos cupons dele: não dá para apagar o último.
+    const mine = await tx.get(db.collection('coupons').where('partnerUid', '==', s.get('partnerUid')).limit(2));
+    if (mine.size < 2) throw new HttpsError('failed-precondition', 'Este é o único cupom do parceiro. Crie outro antes de excluir.');
+    tx.delete(ref);
+  });
+  return { code };
+}
+
+module.exports = { createPartner, createCoupon, renameCoupon, deleteCoupon, validate };
