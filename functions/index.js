@@ -14,6 +14,7 @@ const signup = require('./src/signup.js');
 const partners = require('./src/partners.js');
 const medal = require('./src/medal.js');
 const webhook = require('./src/webhook.js');
+const passwordReset = require('./src/password-reset.js');
 
 exports.onPostWritten = onDocumentWritten('posts/{postId}', points.onPostChange);
 exports.onReactionWritten = onDocumentWritten('posts/{postId}/reactions/{uid}', reactions.onReactionChange);
@@ -28,6 +29,10 @@ exports.startMedalCheckout = onCall({ secrets: [ASAAS_API_KEY] }, medal.startMed
 // E-mail de envio da medalha: sai de letzassessoria@gmail.com com a senha de app no secret GMAIL_APP_PASSWORD.
 exports.updateMedalOrder = onCall({ secrets: [GMAIL_APP_PASSWORD] }, medal.updateMedalOrder);
 exports.resendMedalEmail = onCall({ secrets: [GMAIL_APP_PASSWORD] }, medal.resendMedalEmail);
+// Senha nova por link da Letz; o e-mail sai de letzassessoria@gmail.com.
+exports.requestPasswordReset = onCall({ secrets: [GMAIL_APP_PASSWORD] }, passwordReset.requestPasswordReset);
+exports.createAccessLink = onCall(passwordReset.createAccessLink);
+exports.resetPasswordWithToken = onCall(passwordReset.resetPasswordWithToken);
 exports.createPartner = onCall(partners.createPartner);
 exports.createCoupon = onCall(partners.createCoupon);
 exports.asaasWebhook = onRequest({ secrets: [ASAAS_WEBHOOK_TOKEN] }, webhook.asaasWebhook);

@@ -69,6 +69,6 @@ function medalCheckoutArgs(uid, customerData) {
 }
 
 module.exports = {
-  ASAAS_API_KEY, ASAAS_WEBHOOK_TOKEN, GMAIL_APP_PASSWORD, PROGRAM_PRICE, MEDAL_PRICE,
+  ASAAS_API_KEY, ASAAS_WEBHOOK_TOKEN, GMAIL_APP_PASSWORD, PROGRAM_PRICE, MEDAL_PRICE, APP_URL,
   asaasClient, checkoutArgs, medalCheckoutArgs, customerDataOf,
 };

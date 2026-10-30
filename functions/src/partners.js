@@ -7,20 +7,11 @@ const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestor
 const { getAuth } = require('firebase-admin/auth');
 const core = require('../shared/core.js');
 const { safeErr } = require('./safe.js');
+const { issueLink, ADMIN_TTL_MS } = require('./password-reset.js');
 
 const COUPON_RE = /^[A-Z0-9]{4,20}$/;
 const MSG_CODE_EXISTS = 'Esse código já existe.';
 const MSG_EMAIL_EXISTS = 'Já existe uma conta com este e-mail.';
-
-// apiKey web de cada projeto (pública, a mesma de public/js/fb.js); o link do Admin SDK sai com apiKey vazia.
-const WEB_API_KEYS = {
-  'letz-0-aos-5km': 'AIzaSyA6ohoB15NRgaLBFLRy8EacGgAAWXkXtaU',
-  'letz-0-aos-5km-dev': 'AIzaSyCQ_c-OtMyMqMdKRYqt0mKEgA13-RyGPuU',
-};
-function withApiKey(link) {
-  const key = WEB_API_KEYS[process.env.GCLOUD_PROJECT];
-  return key ? link.replace(/([?&]apiKey=)(?=&|$)/, `$1${key}`) : link;
-}
 
 const bad = (m) => new HttpsError('invalid-argument', m);
 
@@ -103,7 +94,7 @@ async function createPartner(request) {
       code, partnerUid: uid, partnerName: name, active: true, percent, maxUses, usedCount: 0, convertedCount: 0, expiresAt, createdAt: now,
     });
     await batch.commit();
-    const resetLink = withApiKey(await auth.generatePasswordResetLink(email));
+    const resetLink = await issueLink(uid, email, ADMIN_TTL_MS);
     return { uid, code, resetLink };
   } catch (err) {
     const dup = err && (err.code === 6 || err.code === 'already-exists');

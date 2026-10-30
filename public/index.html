@@ -736,9 +736,13 @@ function vCadAddr(d,f,p){var open=!!d.addrOpen,man=!!d.addrManual,line=[d.street
  (open&&man?f('street','Rua ou avenida','type="text" autocomplete="address-line1" maxlength="100"')+f('district','Bairro','type="text" maxlength="60"')+
   '<div class="g2">'+f('city','Cidade','type="text" autocomplete="address-level2" maxlength="60"')+'<div class="field"><label for="'+p+'-uf">Estado</label><select id="'+p+'-uf" autocomplete="address-level1"><option value="">UF</option>'+UFS.map(function(u){return '<option'+(d.uf===u?' selected':'')+'>'+u+'</option>';}).join('')+'</select></div></div>':'')+
  (open?'<div class="g2">'+f('number','Número','type="text" autocomplete="off" maxlength="10" placeholder="123 ou S/N"')+f('complement','Complemento <span class="muted">(opcional)</span>','type="text" autocomplete="address-line2" maxlength="40"')+'</div>':'');}
+function vRedefinir(){var h='<div class="stack" style="gap:6px"><span class="label">Sua conta</span><h1 class="disp" style="font-size:clamp(44px,13vw,72px)">Senha<br>nova</h1></div>';
+ if(V.rdone)return h+'<p class="note" role="status">'+ic('check')+'<span>Pronto! Sua senha foi trocada. Entre com o e-mail e a senha nova.</span></p><button class="btn go wide" data-act="to-login">Entrar '+ic('arrow')+'</button>';
+ if(!V.rtoken)return h+'<p class="err" role="alert">Este link está incompleto. Peça um novo.</p><button class="btn go wide" data-act="to-forgot">Pedir link novo '+ic('arrow')+'</button>';
+ return h+'<p class="muted">Escolha a senha que você vai usar para entrar.</p><form id="f-reset" class="stack" novalidate><div class="field"><label for="in-rp1">Senha nova</label><input id="in-rp1" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Pelo menos 6 caracteres"></div><div class="field"><label for="in-rp2">Repita a senha</label><input id="in-rp2" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false"></div>'+(V.rerr?'<p class="err" role="alert">'+esc(V.rerr)+'</p>':'')+'<button class="btn go wide" type="submit"'+(V.busy?' disabled':'')+'>'+(V.busy?'Salvando…':'Salvar senha '+ic('arrow'))+'</button></form>'+(V.rerr?'<button class="linkbtn" data-act="to-forgot">Pedir link novo</button>':'');}
 function vEsqueci(){return backBtn('Voltar','login')+
  '<div class="stack" style="gap:6px"><span class="label">Sua conta</span><h1 class="disp" style="font-size:clamp(44px,13vw,72px)">Esqueci<br>a senha</h1><p class="muted">Digite o e-mail da sua conta. Enviamos um link para você criar uma senha nova.</p></div>'+
- (V.fsent?'<p class="note" role="status">'+ic('check')+'<span>Se houver uma conta com este e-mail, o link chega em alguns minutos. Confira também a caixa de spam.</span></p><button class="btn go wide" data-act="to-login">Voltar para entrar '+ic('arrow')+'</button>':
+ (V.fsent?'<p class="note" role="status">'+ic('check')+'<span>Se houver uma conta com este e-mail, o link chega em alguns minutos e vale por 2 horas. Confira também a caixa de spam.</span></p><button class="btn go wide" data-act="to-login">Voltar para entrar '+ic('arrow')+'</button>':
  '<form id="f-forgot" class="stack" novalidate><div class="field"><label for="in-femail">E-mail</label><input id="in-femail" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="voce@exemplo.com" value="'+esc(V.femail||'')+'"></div>'+
  (V.ferr?'<p class="err" role="alert">'+esc(V.ferr)+'</p>':'')+
  '<button class="btn go wide" type="submit"'+(V.busy?' disabled':'')+'>'+(V.busy?'Enviando…':'Enviar link')+'</button></form>');}
@@ -1131,7 +1135,7 @@ function couponRow(c){var exp=c.expiresAt?'até '+dmy(c.expiresAt):'sem validade
 function partnerCard(g){var all=[];g.coupons.forEach(function(c){(S.cuses[c.code]||[]).forEach(function(u){all.push(u);});});var st=useStats(all),loaded=g.coupons.every(function(c){return S.cuses[c.code];}),
  signups=loaded?st.signups:g.coupons.reduce(function(s,c){return s+c.usedCount;},0),rate=signups?Math.round(st.conv/signups*100):0,nc=V.ncOpen===g.uid;
  var k=function(l,v,x){return '<div class="kpi"><span>'+l+'</span><b>'+v+'</b>'+(x?'<small>'+x+'</small>':'')+'</div>';};
- return '<section class="card stack" data-partner="'+esc(g.uid)+'"><div class="row" style="justify-content:space-between;gap:10px"><div class="stack" style="gap:2px"><h2 class="disp" style="font-size:26px">'+esc(g.name||'Parceiro')+'</h2><span class="muted">'+g.coupons.length+(g.coupons.length===1?' cupom':' cupons')+'</span></div><button class="btn line sm" data-act="nc-open" data-p="'+esc(g.uid)+'">'+(nc?'Fechar':'Novo cupom')+'</button></div>'+
+ return '<section class="card stack" data-partner="'+esc(g.uid)+'"><div class="row" style="justify-content:space-between;gap:10px"><div class="stack" style="gap:2px"><h2 class="disp" style="font-size:26px">'+esc(g.name||'Parceiro')+'</h2><span class="muted">'+g.coupons.length+(g.coupons.length===1?' cupom':' cupons')+'</span></div><button class="btn line sm" data-act="nc-open" data-p="'+esc(g.uid)+'">'+(nc?'Fechar':'Novo cupom')+'</button><button class="btn line sm" data-act="access-link" data-p="'+esc(g.uid)+'" data-n="'+esc(g.name||'')+'">Link de acesso</button></div>'+
  '<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">'+k('Cadastros',signups)+k('Pagaram',loaded?st.conv:'…','Taxa '+rate+'%')+k('Hoje',loaded?st.today:'…')+k('Últimos 7 dias',loaded?st.d7:'…')+'</div>'+
  (nc?'<form id="f-coupon" class="stack card" data-p="'+esc(g.uid)+'" novalidate style="box-shadow:none">'+couponFields('nc',V.nc)+(V.ncErr?'<p class="err" role="alert">'+esc(V.ncErr)+'</p>':'')+'<button class="btn go sm" type="submit"'+(V.ncBusy?' disabled':'')+'>'+(V.ncBusy?'Criando…':'Criar cupom')+'</button></form>':'')+
  g.coupons.map(couponRow).join('')+'</section>';}
@@ -1140,7 +1144,7 @@ function vParceiros(){if(!V.pf)V.pf=pfInit();var d=V.pf,r=V.pfRes,cs=S.coupons,g
  var h='<section class="card stack"><h2 class="disp" style="font-size:28px">Novo parceiro</h2><p class="muted">O parceiro ganha acesso de aluno sem pagar. Quem se cadastrar com o cupom paga o programa com o desconto.</p>'+
   '<form id="f-partner" class="stack" novalidate>'+pfField('pf-name','Nome do parceiro','type="text" autocomplete="off" maxlength="80" value="'+esc(d.name)+'"')+pfField('pf-email','E-mail','type="email" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="254" value="'+esc(d.email)+'"')+pfField('pf-phone','Celular <span class="muted">(opcional)</span>','type="tel" inputmode="tel" autocomplete="off" maxlength="20" value="'+esc(d.phone)+'"')+couponFields('pf',d)+
   (V.pfErr?'<p class="err" role="alert">'+esc(V.pfErr)+'</p>':'')+'<button class="btn go" type="submit"'+(V.pfBusy?' disabled':'')+'>'+(V.pfBusy?'Criando…':'Cadastrar parceiro e criar cupom')+'</button></form></section>';
- if(r)h+='<section class="card stack" data-pfres role="status"><h2 class="disp" style="font-size:24px">Parceiro criado</h2><p><b>'+esc(r.name)+'</b> · cupom <b class="mono">'+esc(r.code)+'</b></p><p class="muted">Envie este link ao parceiro para ele criar a senha e entrar no app.</p><div class="field"><label for="pr-link">Link de criação de senha</label><input id="pr-link" type="text" readonly value="'+esc(r.resetLink)+'"></div><div class="row"><button class="btn sm" data-act="link-copy">'+(V.copiedL?'Copiado':'Copiar link')+'</button><button class="btn line sm" data-act="pfres-close">Fechar</button></div></section>';
+ if(r)h+='<section class="card stack" data-pfres role="status"><h2 class="disp" style="font-size:24px">'+(r.code?'Parceiro criado':'Link de acesso')+'</h2><p><b>'+esc(r.name)+'</b>'+(r.code?' · cupom <b class="mono">'+esc(r.code)+'</b>':'')+'</p><p class="muted">Envie este link ao parceiro para ele criar a senha e entrar no app. O link vale por 7 dias e só funciona uma vez; se vencer, gere outro no card do parceiro.</p><div class="field"><label for="pr-link">Link de criação de senha</label><input id="pr-link" type="text" readonly value="'+esc(r.resetLink)+'"></div><div class="row"><button class="btn sm" data-act="link-copy">'+(V.copiedL?'Copiado':'Copiar link')+'</button><button class="btn line sm" data-act="pfres-close">Fechar</button></div></section>';
  h+=cs===null?'<p class="muted">Carregando…</p>':!groups.length?'<div class="card stack" style="align-items:flex-start"><b>Nenhum parceiro ainda.</b><p class="muted">Cadastre o primeiro acima. O cupom dele aparece aqui, com cadastros, pagamentos e a data de cada um.</p></div>':groups.map(partnerCard).join('');
  return (V.cfgErr?'<p class="err" role="alert">'+esc(V.cfgErr)+'</p>':'')+h;}
 function vAdmin(){var h=header('Área administrativa')+'<div class="stack" style="gap:6px"><span class="label">Treinador</span><h1 class="disp" style="font-size:56px">Painel</h1></div><div class="seg" role="group" aria-label="Seções">'+[['financeiro','Financeiro'],['turma','Turma'],['treinos','Treinos'],['conteudo','Conteúdo'],['medalhas','Medalhas'],['atletas','Atletas'],['parceiros','Parceiros'],['feed','Feed']].map(function(t){return '<button data-act="atab" data-t="'+t[0]+'" aria-pressed="'+(V.atab===t[0])+'">'+t[1]+'</button>';}).join('')+'</div>';
@@ -1162,9 +1166,9 @@ function vAdmin(){var h=header('Área administrativa')+'<div class="stack" style
 
 var app=document.getElementById('app');
 /* rotas: cada tela tem um endereço (#/entrar, #/app/feed...), então voltar, avançar, atualizar e links diretos funcionam */
-var ROUTES={sales:'/',login:'/entrar',cadastro:'/cadastro',esqueci:'/esqueci',aguardando:'/aguardando',confirmando:'/confirmando',bloqueado:'/bloqueado',medalha:'/medalha',install:'/instalar',profile:'/perfil',welcome:'/boas-vindas',privacy:'/privacidade'};
+var ROUTES={sales:'/',login:'/entrar',cadastro:'/cadastro',esqueci:'/esqueci',redefinir:'/redefinir',aguardando:'/aguardando',confirmando:'/confirmando',bloqueado:'/bloqueado',medalha:'/medalha',install:'/instalar',profile:'/perfil',welcome:'/boas-vindas',privacy:'/privacidade'};
 var TABS=['treinos','feed','ranking','videos','fim'],ATABS=['financeiro','turma','treinos','conteudo','medalhas','atletas','parceiros','feed'];
-var TITLES={sales:'Do 0 aos 5 km',login:'Entrar',cadastro:'Criar conta',esqueci:'Esqueci minha senha',aguardando:'Aguardando pagamento',confirmando:'Confirmando pagamento',bloqueado:'Acesso bloqueado',medalha:'Sua medalha',loading:'Carregando',install:'Instalar o app',profile:'Seu perfil',welcome:'Boas-vindas',privacy:'Privacidade',admin:'Painel',athlete:'Treinos'};
+var TITLES={sales:'Do 0 aos 5 km',login:'Entrar',cadastro:'Criar conta',esqueci:'Esqueci minha senha',redefinir:'Senha nova',aguardando:'Aguardando pagamento',confirmando:'Confirmando pagamento',bloqueado:'Acesso bloqueado',medalha:'Sua medalha',loading:'Carregando',install:'Instalar o app',profile:'Seu perfil',welcome:'Boas-vindas',privacy:'Privacidade',admin:'Painel',athlete:'Treinos'};
 var TAB_TITLES={treinos:'Treinos',feed:'Feed',ranking:'Ranking',videos:'Vídeos',fim:'Conclusão'};
 /* papel da sessão: null (sem login), 'admin', 'athlete', 'pending' ou 'blocked'; sessionKnown fica true na primeira resposta do LetzFB */
 var role=null,prevRole=null,sessionKnown=false;
@@ -1172,13 +1176,14 @@ function roleOf(s){if(!s)return null;if(s.claims&&s.claims.admin===true)return '
 function home(){return role==='admin'?'admin':role==='athlete'?(guideDue()?'install':!S.profiled?'profile':S.welcomed?'athlete':'welcome'):role==='pending'?'aguardando':role==='blocked'?'bloqueado':'login';}
 var NEEDS_SESSION=['admin','athlete','profile','welcome','aguardando','confirmando','bloqueado','medalha'];
 var pushes=0,lastPath=null,fromPop=false;
-function pathOf(){return V.view==='athlete'?'/app/'+V.tab:V.view==='admin'?'/admin/'+V.atab:V.view==='loading'?V.wait:(ROUTES[V.view]||'/');}
+function pathOf(){return V.view==='athlete'?'/app/'+V.tab:V.view==='admin'?'/admin/'+V.atab:V.view==='loading'?V.wait:V.view==='redefinir'&&V.rtoken?'/redefinir/'+V.rtoken:(ROUTES[V.view]||'/');}
 function applyPath(hash){var seg=String(hash||'').replace(/^#\/?/,'').split('/'),first=seg[0],view=null,k;
  if(first==='app'){view='athlete';V.tab=TABS.indexOf(seg[1])>-1?seg[1]:'treinos';if(V.tab==='fim'&&!concluded())V.tab='treinos';}
  else if(first==='admin'){view='admin';V.atab=ATABS.indexOf(seg[1])>-1?seg[1]:'financeiro';}
  else if(first===''){view=STANDALONE?'login':'sales';}
  else for(k in ROUTES)if(ROUTES[k]==='/'+first)view=k;
  if(!view)view=STANDALONE?'login':'sales';
+ if(view==='redefinir'&&seg[1]){V.rtoken=seg[1];V.rdone=false;V.rerr='';}
  /* a guarda espera a primeira sessão: até lá, as telas com login mostram "Carregando…" e o endereço fica */
  if(NEEDS_SESSION.indexOf(view)>-1&&!sessionKnown){V.wait=view==='athlete'?'/app/'+V.tab:view==='admin'?'/admin/'+V.atab:ROUTES[view];view='loading';}
  else if(view==='admin'){if(role!=='admin')view=home();}
@@ -1213,7 +1218,7 @@ applyPath(location.hash);
 var app=document.getElementById('app');
 function render(){routeSync();app.className=V.view==='sales'?'wide':V.view==='admin'?'adm':'';var v=V.view,st=function(h){return '<div class="view stack" style="gap:22px">'+h+'</div>';};
  app.innerHTML=v==='privacy'?'<div class="view">'+vPrivacy()+'</div>':v==='sales'?'<div class="view">'+vSales()+'</div>':v==='install'?'<div class="view">'+vInstall()+'</div>':v==='profile'?'<div class="view">'+vProfile()+'</div>':
-  v==='login'?st(vLogin()):v==='welcome'?st(vWelcome()):v==='cadastro'?st(vCadastro()):v==='esqueci'?st(vEsqueci()):v==='aguardando'?st(vAguardando()):v==='confirmando'?st(vConfirmando()):v==='bloqueado'?st(vBloqueado()):v==='medalha'?st(vMedalha())+vSheet():
+  v==='login'?st(vLogin()):v==='welcome'?st(vWelcome()):v==='cadastro'?st(vCadastro()):v==='esqueci'?st(vEsqueci()):v==='redefinir'?st(vRedefinir()):v==='aguardando'?st(vAguardando()):v==='confirmando'?st(vConfirmando()):v==='bloqueado'?st(vBloqueado()):v==='medalha'?st(vMedalha())+vSheet():
   v==='loading'?'<div class="view">'+(V.fbfail&&!window.LetzFB?'<div class="stack" style="align-items:center;padding:48px 0"><p class="err" role="alert">Não conseguimos conectar ao servidor. Confira sua internet.</p><button class="btn go" data-act="reload">Tentar de novo</button></div>':'<p class="muted" role="status" style="text-align:center;padding:48px 0">Carregando…</p>')+'</div>':v==='admin'?vAdmin()+vCli():vAthlete();}
 
 app.addEventListener('submit',function(e){e.preventDefault();
@@ -1256,11 +1261,17 @@ app.addEventListener('submit',function(e){e.preventDefault();
   if(!V.ncErr){var np=couponPayload(nd2);np.partnerUid=e.target.getAttribute('data-p');V.ncBusy=true;
    LetzFB.createCoupon(np).then(function(){V.ncBusy=false;V.ncOpen='';V.nc=ncInit();softRender();},function(er){V.ncBusy=false;V.ncErr=LetzFB.errorMessage(er);softRender();});}
   softRender();return;}
+ if(e.target.id==='f-reset'){var p1=document.getElementById('in-rp1').value,p2=document.getElementById('in-rp2').value;
+  if(p1.length<6){V.rerr='A senha precisa ter pelo menos 6 caracteres.';render();return;}
+  if(p1!==p2){V.rerr='As senhas não são iguais.';render();return;}
+  if(!window.LetzFB){V.rerr='Sem conexão com o servidor. Confira sua internet e tente de novo.';render();return;}
+  V.busy=true;V.rerr='';render();
+  LetzFB.resetPasswordWithToken(V.rtoken,p1).then(function(r){V.busy=false;V.rdone=true;V.rtoken='';V.lemail=r.email;render();},function(er){V.busy=false;V.rerr=LetzFB.errorMessage(er);render();});return;}
  if(e.target.id==='f-forgot'){var fe=document.getElementById('in-femail').value.trim();V.femail=fe;
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fe)){V.ferr='Informe um e-mail válido.';render();return;}
   if(!window.LetzFB){V.ferr='Sem conexão com o servidor. Confira sua internet e tente de novo.';render();return;}
   var sent=function(){V.busy=false;V.fsent=true;render();};V.busy=true;V.ferr='';render();
-  LetzFB.resetPassword(fe).then(sent,function(er){if(er&&er.code==='auth/user-not-found')sent();else{V.busy=false;V.ferr=LetzFB.errorMessage(er);render();}});return;}
+  LetzFB.resetPassword(fe).then(sent,function(er){V.busy=false;V.ferr=LetzFB.errorMessage(er);render();});return;}
  if(e.target.id!=='f-login')return;
  var le=document.getElementById('in-email').value.trim(),lp=document.getElementById('in-pass').value;V.lemail=le;
  if(!le||!lp){V.err='Digite seu e-mail e sua senha.';render();return;}
@@ -1392,6 +1403,7 @@ app.addEventListener('click',function(e){var b=e.target.closest('[data-act]');if
  else if(a==='sg-coupon-open'){V.sg.couponOpen=true;var ycp=window.scrollY;render();window.scrollTo(0,ycp);var ci=document.getElementById('sg-coupon');if(ci)ci.focus({preventScroll:true});return;}
  else if(a==='cp-copy'){var cc=b.getAttribute('data-code');try{navigator.clipboard.writeText(cc);}catch(er){}V.copiedC=cc;softRender();return;}
  else if(a==='link-copy'){var lk=document.getElementById('pr-link');try{navigator.clipboard.writeText(lk.value).catch(function(){lk.select();});}catch(er){lk.select();}V.copiedL=true;softRender();return;}
+ else if(a==='access-link'){var alb=b;V.cfgErr='';LetzFB.accessLink(alb.getAttribute('data-p')).then(function(r){V.pfRes={name:alb.getAttribute('data-n'),code:'',resetLink:r.resetLink};V.copiedL=false;softRender();window.scrollTo(0,0);},function(er){V.cfgErr=LetzFB.errorMessage(er);softRender();});return;}
  else if(a==='pfres-close'){V.pfRes=null;V.copiedL=false;softRender();return;}
  else if(a==='cp-uses'){var uc=b.getAttribute('data-code');V.uopen[uc]=!V.uopen[uc];softRender();return;}
  else if(a==='nc-open'){var pu=b.getAttribute('data-p');V.ncOpen=V.ncOpen===pu?'':pu;V.nc=ncInit();V.ncErr='';softRender();return;}
