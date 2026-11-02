@@ -220,20 +220,24 @@ test('conteúdo: vídeos, links e grupo só gravam em Salvar alterações, com v
   await coachPanel(page, 'Conteúdo');
   await page.getByLabel('Link de convite do grupo no WhatsApp').fill('http://inseguro.example/x');
   await page.getByRole('button', { name: 'Salvar alterações' }).click();
-  await expect(page.getByText('Confira os links: todos precisam começar com https://')).toBeVisible();
+  await expect(page.getByText('Confira o link do grupo: precisa começar com https://')).toBeVisible();
   await page.getByLabel('Link de convite do grupo no WhatsApp').fill('https://chat.whatsapp.com/abc123');
-  await page.getByLabel('Link do vídeo da assessoria').fill('https://youtu.be/xyz');
+  await page.getByLabel('Link do vídeo da assessoria').fill('https://youtu.be/xyzXYZ12345');
   await page.getByRole('button', { name: 'Adicionar vídeo' }).click();
   await page.locator('input[data-vf="t"]').last().fill('Vídeo novo');
-  await page.locator('input[data-vf="u"]').last().fill('https://youtu.be/novo');
+  await page.locator('input[data-vf="u"]').last().fill('https://youtu.be/novoNOVO123');
+  await page.getByLabel('Link do vídeo da assessoria').fill('https://vimeo.com/123456789');
+  await page.getByRole('button', { name: 'Salvar alterações' }).click();
+  await expect(page.getByText('Use um link do YouTube nos vídeos')).toBeVisible();
+  await page.getByLabel('Link do vídeo da assessoria').fill('https://youtu.be/xyzXYZ12345');
   await page.waitForTimeout(400);
   expect(((await db.doc('config/app').get()).data() || {}).grupo).not.toBe('https://chat.whatsapp.com/abc123');
   await page.getByRole('button', { name: 'Salvar alterações' }).click();
   await expect(page.getByText('Alterações salvas')).toBeVisible();
   await waitUntil(async () => {
     const d = (await db.doc('config/app').get()).data();
-    return d.grupo === 'https://chat.whatsapp.com/abc123' && d.av === 'https://youtu.be/xyz'
-      && d.videos.some((v) => v.t === 'Vídeo novo' && v.u === 'https://youtu.be/novo');
+    return d.grupo === 'https://chat.whatsapp.com/abc123' && d.av === 'https://youtu.be/xyzXYZ12345'
+      && d.videos.some((v) => v.t === 'Vídeo novo' && v.u === 'https://youtu.be/novoNOVO123');
   });
   await page.getByLabel('Link de convite do grupo no WhatsApp').fill('https://chat.whatsapp.com/outro');
   await page.getByRole('button', { name: 'Descartar' }).click();

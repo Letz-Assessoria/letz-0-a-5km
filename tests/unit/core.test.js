@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const core = createRequire(import.meta.url)('../../public/lib/core.js');
-const { WEEK_MS, weekOpen, weekIndex, pointedKeys, pointsFor, isConcluded, isValidCpf, normalizeCpf, normalizePhone, normalizeCep, cleanAddress, cleanHandle } = core;
+const { WEEK_MS, weekOpen, weekIndex, pointedKeys, pointsFor, isConcluded, isValidCpf, normalizeCpf, normalizePhone, normalizeCep, cleanAddress, cleanHandle, ytId } = core;
 const start = Date.parse('2026-11-08T18:00:00-03:00');
 
 test('pointsFor: 4 marcações na semana 1 dão 9 pontos e 4 feitos', () => {
@@ -76,4 +76,18 @@ test('normalizeCep e cleanAddress', () => {
   assert.equal(cleanAddress({ ...ok, cep: '123' }), null);
   assert.equal(cleanAddress({ ...ok, street: 'x'.repeat(101) }), null);
   assert.equal(cleanAddress(null), null);
+});
+
+test('ytId', () => {
+  const id = 'dQw4w9WgXcQ';
+  for (const u of [
+    `https://www.youtube.com/watch?v=${id}`, `https://youtube.com/watch?v=${id}&t=30s`, `https://m.youtube.com/watch?v=${id}`,
+    `https://youtu.be/${id}`, `https://youtu.be/${id}?si=abc`, `https://www.youtube.com/shorts/${id}`,
+    `https://www.youtube.com/embed/${id}`, `https://www.youtube.com/live/${id}?feature=share`, `  https://youtu.be/${id}  `,
+  ]) assert.equal(ytId(u), id, u);
+  for (const u of [
+    '', null, undefined, 'https://vimeo.com/123456789', `https://youtube.com.evil.com/watch?v=${id}`, `https://evil.com/watch?v=${id}`,
+    'https://youtu.be/curto', `http://youtu.be/${id}`, `javascript:alert(1)//youtu.be/${id}`, 'https://www.youtube.com/watch',
+    `https://www.youtube.com/watch?v=${id}x`, 'https://www.youtube.com/@canal',
+  ]) assert.equal(ytId(u), null, String(u));
 });
