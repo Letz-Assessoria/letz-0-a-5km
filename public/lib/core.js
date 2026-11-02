@@ -77,6 +77,20 @@
 
   function cleanHandle(v) { return v.toLowerCase().replace(/^@+/, '').replace(/[^a-z0-9._]/g, '').slice(0, 30); }
 
+  // ID do vídeo do YouTube (11 caracteres) em links de watch, youtu.be, shorts, embed e live; null para o resto.
+  function ytId(u) {
+    var x;
+    try { x = new URL(String(u == null ? '' : u).trim()); } catch (e) { return null; }
+    if (x.protocol !== 'https:') return null;
+    var h = x.hostname.toLowerCase(), id = null, m;
+    if (h === 'youtu.be') id = x.pathname.slice(1).split('/')[0];
+    else if (h === 'youtube.com' || h === 'www.youtube.com' || h === 'm.youtube.com' || h === 'youtube-nocookie.com' || h === 'www.youtube-nocookie.com') {
+      if (x.pathname === '/watch') id = x.searchParams.get('v');
+      else if ((m = x.pathname.match(/^\/(shorts|embed|live)\/([^/]+)/))) id = m[2];
+    }
+    return id && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null;
+  }
+
   // Projeto do Firebase por host. Só o site/preview de DEV usa dev; qualquer outro
   // domínio (inclusive previews de prod "letz-0-aos-5km--...") é PROD.
   function projectForHost(host) {
@@ -87,7 +101,7 @@
   }
 
   return {
-    projectForHost: projectForHost,
+    projectForHost: projectForHost, ytId: ytId,
     WEEK_MS: WEEK_MS, DEFAULT_START_ISO: DEFAULT_START_ISO,
     weekOpen: weekOpen, weekIndex: weekIndex, pointedKeys: pointedKeys, pointsFor: pointsFor,
     isConcluded: isConcluded, isValidCpf: isValidCpf, normalizeCpf: normalizeCpf,

@@ -535,3 +535,39 @@ test.describe('post da medalha no feed', () => {
     await ctx.close();
   });
 });
+
+test('vídeos: YouTube toca dentro do app (iframe), sem placeholder, sem link externo e sem scroll lateral', async ({ page }) => {
+  await db.doc('config/app').set({ videos: [{ t: 'Zonas de intensidade', u: 'https://youtu.be/dQw4w9WgXcQ' }, { t: 'Sem link', u: '' }, { t: 'Outro site', u: 'https://vimeo.com/1' }] }, { merge: true });
+  const a = await makeAthlete();
+  await page.setViewportSize({ width: 390, height: 800 });
+  await login(page, a);
+  await tab(page, 'Vídeos');
+  await expect(page.locator('iframe[src^="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"]')).toHaveCount(1);
+  await expect(page.getByText('Zonas de intensidade')).toBeVisible();
+  await expect(page.getByText('Vídeo em breve')).toHaveCount(0);
+  await expect(page.getByText('Sem link')).toHaveCount(0);
+  await expect(page.getByText('Outro site')).toHaveCount(0);
+  await expect(page.locator('a[target="_blank"][href*="youtu"]')).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await db.doc('config/app').set({ videos: admin.firestore.FieldValue.delete() }, { merge: true });
+});
+
+test('vídeos: sem nenhum cadastrado a aba mostra a mensagem e nenhum iframe', async ({ page }) => {
+  await db.doc('config/app').set({ videos: admin.firestore.FieldValue.delete() }, { merge: true });
+  const a = await makeAthlete();
+  await login(page, a);
+  await tab(page, 'Vídeos');
+  await expect(page.getByText('Os vídeos aparecem aqui assim que a assessoria publicar.')).toBeVisible();
+  await expect(page.locator('iframe')).toHaveCount(0);
+});
+
+test('a próxima semana destrava sozinha com o app aberto, sem recarregar', async ({ page }) => {
+  const a = await makeAthlete();
+  await login(page, a);
+  await expect(page).toHaveURL(/#\/app\/treinos$/);
+  await expect(page.getByRole('button', { name: /Semana 2, trancada/ })).toBeVisible();
+  // A semana 2 abre em ~4 s; o treinador mexendo no início da turma reagenda o timer.
+  await db.doc('config/app').set({ start: Date.now() - 7 * 864e5 + 4000 }, { merge: true });
+  await expect(page.getByRole('button', { name: /Semana 2, trancada/ })).toHaveCount(0, { timeout: 12000 });
+  await expect(page.getByRole('button', { name: /Semana 2/ })).toBeVisible();
+});
