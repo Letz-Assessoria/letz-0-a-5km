@@ -397,6 +397,7 @@ html{scroll-behavior:smooth}
 .miles li.goal{background:var(--accent)}
 .miles li.goal b,.miles li.goal span{color:var(--on-accent)}
 @media (max-width:760px){.miles{grid-template-columns:repeat(2,minmax(0,1fr))}.jchart{height:190px}.jpeak{font-size:19px;padding:7px 12px;left:84%}.callout{right:calc(16% + 54px);font-size:14px}}
+.cpbox{padding:12px 14px;border:1.5px solid var(--accent);border-radius:18px;background:var(--soft)}
 .grp{display:grid;grid-template-columns:44px minmax(0,1fr) 22px;gap:12px;align-items:center;padding:12px 14px;border-radius:18px;background:#1FAF55;color:#fff;text-decoration:none}
 .grp>svg:first-child{width:44px;height:44px;padding:10px;box-sizing:border-box;border-radius:50%;background:rgba(255,255,255,.18)}
 .grp b{display:block;font-size:16px}
@@ -713,10 +714,10 @@ function vCadastro(){var d=V.sg,f=addrField('sg',d);
  f('email','E-mail','type="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254" placeholder="voce@exemplo.com"')+
  f('cpf','CPF','type="text" inputmode="numeric" autocomplete="off" maxlength="14" placeholder="000.000.000-00"','O pagamento fica no seu nome, com este CPF.')+
  f('phone','Celular com DDD','type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="(81) 99999-9999"')+
+ '<div class="cpbox">'+f('coupon','Cupom de desconto (opcional)','type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="20" placeholder="Digite seu cupom, se tiver"','Tem um cupom de parceiro? Digite aqui: o desconto já vem no pagamento.')+'</div>'+
  vCadAddr(d,f,'sg')+
  f('pass','Senha','type="password" autocomplete="new-password" maxlength="128"','Pelo menos 6 caracteres. É com ela que você entra no app.')+
  f('pass2','Confirme a senha','type="password" autocomplete="new-password" maxlength="128"')+
- (d.couponOpen?f('coupon','Código do cupom','type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="20"','Cupom de parceiro: o desconto já entra no pagamento.'):'<button type="button" class="linkbtn" data-act="sg-coupon-open">Tenho um cupom</button>')+
  '<label class="check" for="sg-accept"><input id="sg-accept" type="checkbox"'+(d.accept?' checked':'')+'><span>Li e aceito a <button type="button" class="linkbtn" data-act="to-privacy">política de privacidade</button>.</span></label>'+
  (V.serr?'<p class="err" role="alert">'+esc(V.serr)+'</p>':'')+
  '<button class="btn go wide" type="submit"'+(V.busy?' disabled':'')+'>'+(V.busy?'Criando sua conta…':'Criar conta e ir para o pagamento '+ic('arrow'))+'</button></form>'+
@@ -1236,11 +1237,11 @@ app.addEventListener('submit',function(e){e.preventDefault();
   else if(!(g.number||'').trim())V.serr='Informe o número do endereço (ou S/N).';
   else if((g.pass||'').length<6)V.serr='A senha precisa ter pelo menos 6 caracteres.';
   else if(g.pass!==g.pass2)V.serr='As duas senhas não são iguais.';
-  else if(g.couponOpen&&(g.coupon||'').trim()&&!/^[A-Z0-9]{4,20}$/.test((g.coupon||'').trim().toUpperCase()))V.serr='Cupom inválido ou esgotado.';
+  else if((g.coupon||'').trim()&&!/^[A-Z0-9]{4,20}$/.test((g.coupon||'').trim().toUpperCase()))V.serr='Cupom inválido ou esgotado.';
   else if(!g.accept)V.serr='Para continuar, aceite a política de privacidade.';
   else if(!window.LetzFB)V.serr='Sem conexão com o servidor. Confira sua internet e tente de novo.';
   else{V.serr='';V.busy=true;V.signingUp=true;
-   LetzFB.signup({name:nm,email:em,password:g.pass,cpf:g.cpf,phone:g.phone,address:{cep:g.cep,street:g.street.trim(),number:g.number.trim(),complement:(g.complement||'').trim(),district:g.district.trim(),city:g.city.trim(),uf:g.uf},acceptPolicy:true,coupon:g.couponOpen?(g.coupon||'').trim().toUpperCase():''}).then(function(r){V.sg={};location.assign(r.checkoutUrl);},
+   LetzFB.signup({name:nm,email:em,password:g.pass,cpf:g.cpf,phone:g.phone,address:{cep:g.cep,street:g.street.trim(),number:g.number.trim(),complement:(g.complement||'').trim(),district:g.district.trim(),city:g.city.trim(),uf:g.uf},acceptPolicy:true,coupon:(g.coupon||'').trim().toUpperCase()}).then(function(r){V.sg={};location.assign(r.checkoutUrl);},
     function(er){V.signingUp=false;V.busy=false;var m=LetzFB.errorMessage(er);if(er&&er.code==='functions/failed-precondition'&&/vendas/i.test(String(er.message||'')))m='As vendas estão encerradas.';if(er&&er.signedIn){V.sg={};reroute(m);}else{V.serr=m;render();}});}
   render();return;}
  if(e.target.id==='f-partner'){var pd2=V.pf||(V.pf=pfInit()),pn=(pd2.name||'').trim().replace(/\s+/g,' '),pe=(pd2.email||'').trim();
@@ -1397,7 +1398,7 @@ app.addEventListener('click',function(e){var b=e.target.closest('[data-act]');if
  else if(a==='sheet-cancel'){V.sheet=null;}
 
  else if(a==='set-start'){el=document.getElementById('in-start');var t=new Date(el.value).getTime();if(!isNaN(t)){S.start=t;V.dstart='';cfgSave({start:t});}}
- else if(a==='sg-coupon-open'){V.sg.couponOpen=true;var ycp=window.scrollY;render();window.scrollTo(0,ycp);var ci=document.getElementById('sg-coupon');if(ci)ci.focus({preventScroll:true});return;}
+
  else if(a==='cr-open'){V.crn=b.getAttribute('data-code');V.crv=V.crn;V.cdel='';V.cfgErr='';softRender();return;}
  else if(a==='cr-cancel'){V.crn='';V.cfgErr='';softRender();return;}
  else if(a==='cr-save'){var cro=b.getAttribute('data-code');if(V.crb)return;if(!/^[A-Z0-9]{4,20}$/.test(V.crv||'')){V.cfgErr='O código do cupom precisa ter de 4 a 20 letras ou números.';softRender();return;}
