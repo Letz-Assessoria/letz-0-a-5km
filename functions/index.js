@@ -23,6 +23,7 @@ exports.onConfigWritten = onDocumentWritten({ document: 'config/app', timeoutSec
 
 exports.signup = onCall({ secrets: [ASAAS_API_KEY] }, signup.signup);
 exports.resumeCheckout = onCall({ secrets: [ASAAS_API_KEY] }, signup.resumeCheckout);
+exports.applyCoupon = onCall({ secrets: [ASAAS_API_KEY] }, signup.applyCoupon);
 exports.rebuyProgram = onCall({ secrets: [ASAAS_API_KEY] }, signup.rebuyProgram);
 exports.requestRefund = onCall(medal.requestRefund);
 exports.startMedalCheckout = onCall({ secrets: [ASAAS_API_KEY] }, medal.startMedalCheckout);

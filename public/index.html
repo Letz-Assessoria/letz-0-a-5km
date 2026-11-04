@@ -743,8 +743,15 @@ function vEsqueci(){return backBtn('Voltar','login')+
  '<button class="btn go wide" type="submit"'+(V.busy?' disabled':'')+'>'+(V.busy?'Enviando…':'Enviar link')+'</button></form>');}
 function vAguardando(){return header('Sua conta')+
  '<div class="stack" style="gap:6px"><span class="label">Cadastro feito</span><h1 class="disp" style="font-size:clamp(34px,10.5vw,64px)">Aguardando<br>o pagamento</h1><p class="muted">Falta concluir o pagamento pelo Asaas, com Pix ou cartão. Se você já pagou, a confirmação pode levar alguns minutos, e o app abre sozinho.</p></div>'+
+ couponLater()+
  (V.aerr?'<p class="err" role="alert">'+esc(V.aerr)+'</p>':'')+
- '<button class="btn go wide" data-act="resume"'+(V.busy?' disabled':'')+'>'+(V.busy?'Abrindo o pagamento…':'Concluir pagamento '+ic('arrow'))+'</button>'+contato();}
+ '<button class="btn go wide" data-act="resume"'+(V.busy||V.acbusy?' disabled':'')+'>'+(V.busy?'Abrindo o pagamento…':'Concluir pagamento '+ic('arrow'))+'</button>'+contato();}
+// Cupom esquecido no cadastro: o aluno ainda sem pagar aplica aqui e o pagamento reabre com o valor novo.
+function couponLater(){
+ if(V.acok)return '<p class="note" role="status">'+ic('check')+'<span>'+esc(V.acok)+'</span></p>';
+ return '<form id="f-acoupon" class="cpbox stack" novalidate style="gap:10px"><div class="field"><label for="in-acp">Esqueceu o cupom? Digite aqui (opcional)</label><input id="in-acp" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="20" placeholder="Digite seu cupom" value="'+esc(V.acv||'')+'"></div>'+
+  (V.acerr?'<p class="err" role="alert">'+esc(V.acerr)+'</p>':'')+
+  '<button class="btn line wide" type="submit"'+(V.acbusy||V.busy?' disabled':'')+'>'+(V.acbusy?'Aplicando…':'Aplicar cupom')+'</button></form>';}
 function vConfirmando(){return header('Sua conta')+
  '<div class="stack" style="gap:6px"><span class="label">Pagamento</span><h1 class="disp" style="font-size:clamp(44px,13vw,72px)">Quase<br>lá</h1></div>'+
  '<div class="card stack"><p role="status"><b>Confirmando seu pagamento…</b></p><p class="muted">No Pix, leva poucos segundos. No cartão, pode levar alguns minutos. Esta tela muda sozinha quando o pagamento for confirmado.</p></div>'+
@@ -1263,6 +1270,11 @@ app.addEventListener('submit',function(e){e.preventDefault();
   if(!window.LetzFB){V.rerr='Sem conexão com o servidor. Confira sua internet e tente de novo.';render();return;}
   V.busy=true;V.rerr='';render();
   LetzFB.resetPasswordWithToken(V.rtoken,p1).then(function(r){V.busy=false;V.rdone=true;V.rtoken='';V.lemail=r.email;render();},function(er){V.busy=false;V.rerr=LetzFB.errorMessage(er);render();});return;}
+ if(e.target.id==='f-acoupon'){var ac=cleanCode(document.getElementById('in-acp').value);V.acv=ac;
+  if(ac.length<4){V.acerr='O código do cupom precisa ter de 4 a 20 letras ou números.';render();return;}
+  if(!window.LetzFB){V.acerr='Sem conexão com o servidor. Confira sua internet e tente de novo.';render();return;}
+  V.acbusy=true;V.acerr='';render();
+  LetzFB.applyCoupon(ac).then(function(r){V.acbusy=false;V.acok='Cupom '+ac+' aplicado: '+r.percent+'% de desconto. O valor agora é '+brl(r.value)+'. Toque em Concluir pagamento.';V.aerr='';render();},function(er){V.acbusy=false;V.acerr=LetzFB.errorMessage(er);render();});return;}
  if(e.target.id==='f-forgot'){var fe=document.getElementById('in-femail').value.trim();V.femail=fe;
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fe)){V.ferr='Informe um e-mail válido.';render();return;}
   if(!window.LetzFB){V.ferr='Sem conexão com o servidor. Confira sua internet e tente de novo.';render();return;}
@@ -1287,6 +1299,7 @@ app.addEventListener('input',function(e){var id=e.target.id,ga=function(n){retur
  if(id==='in-start')V.dstart=e.target.value;
  if(id==='sg-cpf'||id==='sg-phone'){var mv=id==='sg-cpf'?fmtCpf(e.target.value):fmtPhone(e.target.value);if(mv!==e.target.value)e.target.value=mv;}
  if((id==='sg-cep'&&V.sg)||(id==='md-cep'&&V.mo)){var cg=id==='sg-cep'?V.sg:V.mo.d,cp=id.slice(0,2),sv=fmtCep(e.target.value);if(sv!==e.target.value)e.target.value=sv;var s8=sv.replace(/\D/g,'');if(s8.length===8&&s8!==cg.lastCep){cg.lastCep=s8;lookupAddrCep(cg,cp,function(){return cp==='sg'?V.sg===cg:!!V.mo&&V.mo.d===cg;},s8);}else if(s8.length<8&&cg.lastCep){cg.lastCep='';}}
+ if(id==='in-acp'){var acv=cleanCode(e.target.value);if(acv!==e.target.value)e.target.value=acv;V.acv=acv;return;}
  if(id==='sg-coupon'){var cv=cleanCode(e.target.value);if(cv!==e.target.value)e.target.value=cv;}
  if(id&&id.indexOf('pf-')===0){var pd=V.pf||(V.pf=pfInit());if(id==='pf-code'){var pcv=cleanCode(e.target.value);if(pcv!==e.target.value)e.target.value=pcv;pd.codeTouched=true;}if(id==='pf-phone'){var pph=fmtPhone(e.target.value);if(pph!==e.target.value)e.target.value=pph;}pd[id.slice(3)]=e.target.value;if(id==='pf-name'&&!pd.codeTouched){pd.code=codeFromName(e.target.value);var pce=document.getElementById('pf-code');if(pce)pce.value=pd.code;}return;}
  if(id&&id.indexOf('cr-')===0){var crc=cleanCode(e.target.value);if(crc!==e.target.value)e.target.value=crc;V.crv=crc;return;}
@@ -1431,7 +1444,7 @@ var billUid='',billStop=null;
 /* redesenho depois de mudar V.bill/rsent/rerr: softRender ignora o perfil, então ele guarda o rascunho e redesenha aqui */
 function billRender(){if(V.view!=='profile'){softRender();return;}grab();var y=window.scrollY,id=(document.activeElement||{}).id;render();window.scrollTo(0,y);var el=id&&document.getElementById(id);if(el)el.focus({preventScroll:true});}
 function watchBill(r,uid){var w=(r==='athlete'||r==='blocked')?uid:'';if(w===billUid)return;billUid=w;if(billStop){billStop();billStop=null;}V.bill=null;if(w)billStop=LetzFB.watchBilling(function(x){V.bill=x;billRender();});}
-function resetData(){V.mo=null;V.mAuto=false;V.rsent={};V.rerr='';V.tdraft={};V.cd=null;V.cdirty=false;V.tsaved=false;V.csaved=false;V.cli=null;V.fq='';V.mst='todas';V.mq='';V.mform=null;V.mback=null;V.merr={};V.mnote={};V.mbusy={};V.mcopied='';stops.forEach(function(f){try{f();}catch(e){}});stops=[];for(var id in cmSubs)cmSubs[id]();cmSubs={};rxLoading={};dataRole='';S=newS();}
+function resetData(){V.acok='';V.acv='';V.acerr='';V.acbusy=false;V.mo=null;V.mAuto=false;V.rsent={};V.rerr='';V.tdraft={};V.cd=null;V.cdirty=false;V.tsaved=false;V.csaved=false;V.cli=null;V.fq='';V.mst='todas';V.mq='';V.mform=null;V.mback=null;V.merr={};V.mnote={};V.mbusy={};V.mcopied='';stops.forEach(function(f){try{f();}catch(e){}});stops=[];for(var id in cmSubs)cmSubs[id]();cmSubs={};rxLoading={};dataRole='';S=newS();}
 function syncMine(){var m={},c={},ph={};S.mine.forEach(function(p){if(p.medal)return;var k=p.w+'-'+p.d;m[k]=p.at;if(p.comment)c[k]=p.comment;if(p.imgURL)ph[k]=p.imgURL;});S.marks=m;S.comments=c;S.wphotos=ph;}
 var weekTimer=null;
 /* redesenha sozinho quando a próxima semana abre (setTimeout limita ~24 dias: reagenda em blocos) */

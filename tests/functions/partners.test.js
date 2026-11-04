@@ -430,4 +430,48 @@ describe('parceiros e cupons', () => {
       assert.equal((await call('deleteCoupon', { code: 'LIVRE001' }, token)).error.status, 'NOT_FOUND');
     });
   });
+
+  describe('applyCoupon (aluno pendente)', () => {
+    it('aluno pendente sem cupom aplica o cupom: novo checkout com desconto, antigo cancelado, uso contado', async () => {
+      const token = await makeUserToken(true);
+      await call('createPartner', partnerData({ code: 'APLICA15', percent: 15 }), token);
+      const p = person();
+      const su = await call('signup', p);
+      assert.equal(su.error, undefined, JSON.stringify(su.error));
+      const u = await admin.auth().getUserByEmail(p.email);
+      const own = await signIn(p.email, p.password);
+      const oldId = (await get(`users/${u.uid}/private/billing`)).checkoutId;
+      assert.equal((await call('applyCoupon', { code: 'APLICA15' })).error.status, 'UNAUTHENTICATED');
+      const r = await call('applyCoupon', { code: 'aplica15' }, own);
+      assert.equal(r.error, undefined, JSON.stringify(r.error));
+      assert.equal(r.result.percent, 15);
+      assert.equal(r.result.value, 135.15);
+      const b = await get(`users/${u.uid}/private/billing`);
+      assert.equal(b.coupon, 'APLICA15');
+      assert.equal(b.value, 135.15);
+      assert.notEqual(b.checkoutId, oldId);
+      assert.equal(b.url, r.result.checkoutUrl);
+      assert.equal((await get('checkouts/' + oldId)).status, 'canceled');
+      assert.equal((await get('checkouts/' + b.checkoutId)).status, 'active');
+      assert.equal((await get('coupons/APLICA15')).usedCount, 1);
+      assert.equal((await get(`coupons/APLICA15/uses/${u.uid}`)).status, 'signed-up');
+      // já tem cupom: não aplica de novo
+      assert.equal((await call('applyCoupon', { code: 'APLICA15' }, own)).error.status, 'FAILED_PRECONDITION');
+      assert.equal((await get('coupons/APLICA15')).usedCount, 1);
+    });
+
+    it('recusa cupom inexistente, código fora do formato e conta já paga', async () => {
+      const token = await makeUserToken(true);
+      await call('createPartner', partnerData({ code: 'APLICA20' }), token);
+      const p = person();
+      await call('signup', p);
+      const u = await admin.auth().getUserByEmail(p.email);
+      const own = await signIn(p.email, p.password);
+      assert.equal((await call('applyCoupon', { code: 'NAOEXISTE' }, own)).error.status, 'FAILED_PRECONDITION');
+      assert.equal((await call('applyCoupon', { code: 'ab' }, own)).error.status, 'INVALID_ARGUMENT');
+      await db.doc(`users/${u.uid}/private/billing`).update({ status: 'paid' });
+      assert.equal((await call('applyCoupon', { code: 'APLICA20' }, own)).error.status, 'FAILED_PRECONDITION');
+      assert.equal((await get('coupons/APLICA20')).usedCount, 0);
+    });
+  });
 });

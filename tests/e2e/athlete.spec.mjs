@@ -573,7 +573,7 @@ test('a próxima semana destrava sozinha com o app aberto, sem recarregar', asyn
 });
 
 test('perfil: bloco "Fale com a gente" mostra o WhatsApp da assessoria e, quando cadastrado, o grupo da turma', async ({ page }) => {
-  await db.doc('config/app').set({ grupo: '', wa: '' }, { merge: true });
+  await db.doc('config/app').set({ grupo: '', wa: admin.firestore.FieldValue.delete() }, { merge: true });
   const a = await makeAthlete();
   await login(page, a);
   await expect(page.getByRole('navigation', { name: 'Principal' })).toBeVisible();
@@ -590,7 +590,7 @@ test('perfil: bloco "Fale com a gente" mostra o WhatsApp da assessoria e, quando
   await expect(page.getByText('Fale com a gente')).toBeVisible();
   await expect(page.locator('a.grp[href="https://chat.whatsapp.com/abc123"]')).toBeVisible();
   await expect(page.locator('a.wa[href^="https://wa.me/5587999990000?text="]')).toBeVisible();
-  await db.doc('config/app').set({ grupo: '', wa: '' }, { merge: true });
+  await db.doc('config/app').set({ grupo: '', wa: admin.firestore.FieldValue.delete() }, { merge: true });
 });
 
 test('semana trancada: o botão do grupo aparece em Treinos mesmo antes de abrir', async ({ page }) => {
