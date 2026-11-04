@@ -330,9 +330,9 @@ test.describe('medalha', () => {
     // pago: o modal não volta
     await expect(page.getByRole('dialog')).toHaveCount(0);
 
-    await db.doc(`users/${a.uid}/private/medal`).update({ status: 'shipped', trackingCode: 'BR123456789BR', shippedAt: '2026-11-03' });
+    await db.doc(`users/${a.uid}/private/medal`).update({ status: 'shipped', trackingCode: 'BR123456789BR', shippedAt: '2026-10-30' });
     await expect(page.getByText('Enviada', { exact: true })).toBeVisible();
-    await expect(page.getByText('03/11/2026')).toBeVisible();
+    await expect(page.getByText('30/10/2026')).toBeVisible();
     await expect(page.locator('#trk-code')).toHaveText('BR123456789BR');
     await expect(page.getByRole('button', { name: 'Solicitar reembolso' })).toHaveCount(0);
     await expect(page.getByText(/para qualquer reembolso fale com os instrutores/)).toBeVisible();
@@ -570,4 +570,25 @@ test('a próxima semana destrava sozinha com o app aberto, sem recarregar', asyn
   await db.doc('config/app').set({ start: Date.now() - 7 * 864e5 + 4000 }, { merge: true });
   await expect(page.getByRole('button', { name: /Semana 2, trancada/ })).toHaveCount(0, { timeout: 12000 });
   await expect(page.getByRole('button', { name: /Semana 2/ })).toBeVisible();
+});
+
+test('perfil: bloco "Fale com a gente" mostra o WhatsApp da assessoria e, quando cadastrado, o grupo da turma', async ({ page }) => {
+  await db.doc('config/app').set({ grupo: '', wa: '' }, { merge: true });
+  const a = await makeAthlete();
+  await login(page, a);
+  await expect(page.getByRole('navigation', { name: 'Principal' })).toBeVisible();
+  await page.goto('/#/perfil');
+  await expect(page.getByLabel('Seu @')).toBeVisible();
+  // sem grupo cadastrado: só o WhatsApp da assessoria, no número padrão do app
+  await expect(page.getByText('Fale com a gente')).toBeVisible();
+  await expect(page.locator('a.grp')).toHaveCount(0);
+  await expect(page.locator('a.wa[href^="https://wa.me/558781908719?text="]')).toBeVisible();
+  await db.doc('config/app').set({ grupo: 'https://chat.whatsapp.com/abc123', wa: '5587999990000' }, { merge: true });
+  await page.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(page.getByRole('navigation', { name: 'Principal' })).toBeVisible();
+  await page.goto('/#/perfil');
+  await expect(page.getByText('Fale com a gente')).toBeVisible();
+  await expect(page.locator('a.grp[href="https://chat.whatsapp.com/abc123"]')).toBeVisible();
+  await expect(page.locator('a.wa[href^="https://wa.me/5587999990000?text="]')).toBeVisible();
+  await db.doc('config/app').set({ grupo: '', wa: '' }, { merge: true });
 });

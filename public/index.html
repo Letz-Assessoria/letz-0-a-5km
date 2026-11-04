@@ -786,8 +786,10 @@ function vProfile(){var D=V.draft,first=!S.profiled;
  (V.perr?'<p class="err" role="alert">'+esc(V.perr)+'</p>':'')+
  '<div class="stack" style="gap:8px"><span class="label">Assim você aparece no feed</span><div class="preview"><div class="post">'+(D.photo?'<div class="av me"><img src="'+esc(D.photo)+'" alt=""></div>':'<div class="av me" aria-hidden="true" id="pv-ini">'+esc(initials(D.name||D.handle||'?'))+'</div>')+'<div><div><span class="who" id="pv-handle">@'+esc(D.handle||'seu.instagram')+'</span> <span class="muted">· agora</span></div><div class="what">'+ic('run')+'<span>Fez o treino de terça da semana 1</span></div></div></div></div></div>'+
  '<button class="btn go wide" data-act="profile-save"'+(V.pbusy?' disabled':'')+'>'+(V.pbusy?'Salvando…':(first?'Salvar e continuar':'Salvar'))+' '+ic('arrow')+'</button>'+'<button class="linkbtn" data-act="to-privacy">Como usamos seus dados</button>'+(STANDALONE?'':'<button class="linkbtn" data-act="to-install">Como instalar o app no celular</button>')+
- (first?'':'<button class="btn line wide" data-act="profile-cancel">Cancelar</button>')+payBox();}
+ (first?'':'<button class="btn line wide" data-act="profile-cancel">Cancelar</button>')+helpBox()+payBox();}
 /* perfil: seção 'Pagamento e reembolso' (só aluno com pagamento confirmado) */
+/* perfil: atalhos de contato (grupo da turma e WhatsApp da assessoria) */
+function helpBox(){var g=groupBtn(),u=waUrl('Oi! '+waWho()+'. Preciso falar com a assessoria.');if(!g&&!u)return '';return '<div class="stack" style="gap:10px"><span class="label">Fale com a gente</span>'+g+(u?'<a class="wa" href="'+esc(u)+'" target="_blank" rel="noopener">'+ic('chat')+'Falar com a assessoria</a>':'')+'</div>';}
 function payBox(){var c=programRefund();return c?'<div class="stack" style="gap:10px"><span class="label">Pagamento e reembolso</span>'+c+'</div>':'';}
 function openProfile(){V.draft={name:S.profiled?S.name:'',handle:S.handle,photo:S.photo};V.perr='';V.pbusy=false;V.view='profile';}
 function grab(){var n=document.getElementById('in-pname'),h=document.getElementById('in-handle');if(n)V.draft.name=n.value;if(h)V.draft.handle=h.value;}
