@@ -52,9 +52,8 @@ async function signupWithCoupon(browser, code, { expectCheckout = true } = {}) {
   await page.getByLabel('CPF').fill(p.cpf);
   await page.getByLabel('Celular com DDD').fill(p.phone);
   await fillAddress(page, p);
-  await page.getByRole('button', { name: 'Tenho um cupom' }).click();
-  await page.getByLabel('Código do cupom').fill(code.toLowerCase());
-  await expect(page.getByLabel('Código do cupom')).toHaveValue(code);
+  await page.getByLabel('Cupom de desconto (opcional)').fill(code.toLowerCase());
+  await expect(page.getByLabel('Cupom de desconto (opcional)')).toHaveValue(code);
   await page.getByLabel('Senha', { exact: true }).fill(p.password);
   await page.getByLabel('Confirme a senha').fill(p.password);
   await page.getByLabel(/Li e aceito a política de privacidade/).check();
@@ -165,20 +164,19 @@ test('novo cupom para o mesmo parceiro aparece agrupado na lista', async ({ page
   await expect(r).not.toContainText('Pendente');
 });
 
-test('cadastro: link "Tenho um cupom" em 390px, sem rolagem horizontal e sem esconder o endereço', async ({ browser }) => {
+test('cadastro: campo de cupom sempre visível e opcional, em 390px, sem rolagem horizontal e sem esconder o endereço', async ({ browser }) => {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const page = await ctx.newPage();
   page.on('pageerror', (err) => pageErrors.push(String(err)));
   await mockViaCep(page);
   await page.goto('/#/cadastro');
-  const link = page.getByRole('button', { name: 'Tenho um cupom' });
-  await expect(link).toBeVisible();
+  const field = page.getByLabel('Cupom de desconto (opcional)');
+  await expect(field).toBeVisible();
   const noScroll = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
   expect(await noScroll()).toBe(true);
   await page.getByLabel('CEP').fill('50050-000');
-  await link.click();
-  await page.getByLabel('Código do cupom').fill('abc123');
-  await expect(page.getByLabel('Código do cupom')).toHaveValue('ABC123');
+  await field.fill('abc123');
+  await expect(field).toHaveValue('ABC123');
   await expect(page.getByLabel('CEP')).toBeVisible();
   await expect(page.getByLabel('Número')).toBeVisible();
   expect(await noScroll()).toBe(true);
