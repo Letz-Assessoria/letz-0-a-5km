@@ -2,7 +2,7 @@
 // pendente/bloqueado, guarda de rotas e textos das telas de entrada.
 import { test, expect } from '@playwright/test';
 import {
-  auth, callable, checkoutPaid, clearRateLimits, fillAddress, makeCoach, makeUser, mockViaCep, person, webhookToken, FAKE, WEBHOOK,
+  auth, callable, checkoutPaid, clearRateLimits, db, fillAddress, makeCoach, makeUser, mockViaCep, person, webhookToken, FAKE, WEBHOOK,
   skipGuide,
 } from './helpers.mjs';
 
@@ -204,6 +204,34 @@ test('pendente que entra vê aguardando e Concluir pagamento', async ({ page }) 
 
   await page.getByRole('button', { name: 'Concluir pagamento' }).click();
   await page.waitForURL(CHECKOUT_URL);
+});
+
+test('pendente que esqueceu o cupom aplica na tela de aguardando e o pagamento reabre com o desconto', async ({ page }) => {
+  const code = 'ESQUECI' + Date.now().toString().slice(-5);
+  await db.doc('coupons/' + code).set({ active: true, percent: 15, usedCount: 0, partnerUid: null, name: 'Parceiro teste' });
+  const p = person();
+  const res = await callable('signup', { ...p, acceptPolicy: true });
+  expect(res.result && res.result.checkoutUrl).toMatch(CHECKOUT_URL);
+
+  await login(page, p.email, p.password);
+  await expect(page).toHaveURL(/#\/aguardando$/);
+  const field = page.getByLabel(/Esqueceu o cupom/);
+  await expect(field).toBeVisible();
+  await page.getByRole('button', { name: 'Aplicar cupom' }).click();
+  await expect(page.getByText('O código do cupom precisa ter de 4 a 20 letras ou números.')).toBeVisible();
+  await field.fill('naoexiste');
+  await page.getByRole('button', { name: 'Aplicar cupom' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Cupom inválido ou esgotado.' })).toBeVisible();
+  await field.fill(code.toLowerCase());
+  await expect(field).toHaveValue(code);
+  await page.getByRole('button', { name: 'Aplicar cupom' }).click();
+  await expect(page.getByText(/15% de desconto/)).toBeVisible();
+  await expect(page.getByText(/R\$ 135,15/)).toBeVisible();
+  await expect(page.getByLabel(/Esqueceu o cupom/)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Concluir pagamento' }).click();
+  await page.waitForURL(CHECKOUT_URL);
+  const uid = (await auth.getUserByEmail(p.email)).uid;
+  expect((await db.doc(`users/${uid}/private/billing`).get()).data().coupon).toBe(code);
 });
 
 test('bloqueado vê tela de bloqueio', async ({ page }) => {

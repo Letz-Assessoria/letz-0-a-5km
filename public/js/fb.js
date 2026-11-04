@@ -118,6 +118,13 @@ async function resumeCheckout() {
   return { checkoutUrl: r.data.checkoutUrl };
 }
 
+const callApplyCoupon = httpsCallable(functions, 'applyCoupon');
+// Aluno pendente que esqueceu o cupom no cadastro: aplica e o checkout reabre com o valor novo.
+async function applyCoupon(code) {
+  const r = await callApplyCoupon({ code });
+  return { percent: r.data.percent, value: r.data.value };
+}
+
 // Cria a conta pendente (callable), entra e devolve o link do checkout.
 // Se o Asaas falhou depois de a conta existir ('unavailable'), entra mesmo assim
 // e tenta abrir o checkout de novo; se ainda falhar, o erro sai com signedIn = true
@@ -709,7 +716,7 @@ async function setCommentHidden(postId, cid, hidden) {
 }
 window.LetzFB = {
   app, auth, db, functions, storage,
-  onSession, signup, login, logout, resetPassword, resetPasswordWithToken, accessLink, resumeCheckout, errorMessage,
+  onSession, signup, login, logout, resetPassword, resetPasswordWithToken, accessLink, resumeCheckout, applyCoupon, errorMessage,
   saveProfile, markWelcomed, markWorkout, unmarkWorkout, setWorkoutContent, clearWorkoutContent,
   watchMyPosts, watchFeed, loadMoreFeed, watchRanking, watchConfig,
   loadMyReactions, toggleReaction, addComment, deleteComment, watchComments,

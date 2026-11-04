@@ -541,4 +541,45 @@ async function rebuyProgram(request) {
   }
 }
 
-module.exports = { signup, resumeCheckout, rebuyProgram, REFUND_LIMIT, validate, MSG_EXISTS };
+// O próprio aluno aplica um cupom depois do cadastro, enquanto o pagamento ainda está pendente (esqueceu de
+// digitar no cadastro): o desconto fica no billing (como no cadastro com cupom), o checkout antigo é cancelado
+// e abre outro com o valor novo. Só vale para quem ainda não pagou e se cadastrou sem cupom.
+async function applyCoupon(request) {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Entre com seu e-mail e senha.');
+  const uid = request.auth.uid;
+  const d = request.data && typeof request.data === 'object' ? request.data : {};
+  const code = typeof d.code === 'string' ? d.code.trim().toUpperCase() : '';
+  if (!COUPON_RE.test(code)) throw bad(MSG_COUPON);
+  const db = getFirestore();
+  await rateLimit(db, request);
+  const userRef = db.doc('users/' + uid);
+  const billingRef = db.doc(`users/${uid}/private/billing`);
+  const couponRef = db.doc('coupons/' + code);
+  const { oldCheckoutId, percent, value } = await db.runTransaction(async (tx) => {
+    const [user, billing, coupon] = await Promise.all([tx.get(userRef), tx.get(billingRef), tx.get(couponRef)]);
+    if (billing.exists && billing.get('coupon')) throw new HttpsError('failed-precondition', 'Este cadastro já tem um cupom aplicado.');
+    const open = user.exists && user.get('access') === 'pending' && billing.exists && billing.get('status') === 'pending'
+      && !billing.get('rebuyAt') && !cpfGone(billing.data());
+    if (!open) throw new HttpsError('failed-precondition', 'Só dá para aplicar cupom enquanto o pagamento está pendente.');
+    if (!couponUsable(coupon)) throw new HttpsError('failed-precondition', MSG_COUPON);
+    const pct = coupon.get('percent');
+    const val = round2(Number(PROGRAM_PRICE.value()) * (1 - pct / 100));
+    tx.update(couponRef, { usedCount: FieldValue.increment(1) });
+    tx.create(db.doc(`coupons/${code}/uses/${uid}`), {
+      name: user.get('name') || '', partnerUid: coupon.get('partnerUid') || null, at: FieldValue.serverTimestamp(), status: 'signed-up',
+    });
+    tx.update(billingRef, { coupon: code, percent: pct, value: val, updatedAt: FieldValue.serverTimestamp() });
+    return { oldCheckoutId: billing.get('checkoutId'), percent: pct, value: val };
+  });
+  await cancelCheckoutQuietly(db, oldCheckoutId, 'applyCoupon');
+  try {
+    return { checkoutUrl: await openCheckout(db, uid), percent, value };
+  } catch (err) {
+    if (err instanceof HttpsError) throw err;
+    logger.error('applyCoupon: Asaas falhou ao criar o checkout', { uid, status: err && err.status, err: safeErr(err) });
+    // O cupom já está na conta: ao abrir "Concluir pagamento", o checkout sai com o desconto.
+    throw new HttpsError('unavailable', 'Cupom aplicado, mas o Asaas não abriu o pagamento agora. Toque em Concluir pagamento para abrir com o desconto.');
+  }
+}
+
+module.exports = { signup, resumeCheckout, rebuyProgram, applyCoupon, REFUND_LIMIT, validate, MSG_EXISTS };
