@@ -835,7 +835,7 @@ function vTreinos(){var cw=curWeek(), ended=projectEnded(), mw=myWeek(), w=V.wee
  h+='<div class="track" role="group" aria-label="Semanas">';
  for(var n=1;n<=10;n++){var op=isOpen(n),dn=doneIn(n);h+='<button class="wk'+(op?'':' locked')+(dn===3?' full':dn?' part':'')+'" data-act="week" data-n="'+n+'" aria-pressed="'+(n===w)+'" aria-label="Semana '+n+(op?'':', trancada')+'">'+(op?n+'<i class="pip"></i>':ic('lock'))+'</button>';}
  h+='</div>';
- if(!isOpen(w)){return h+'<div class="card stack" style="align-items:flex-start">'+ic('lock')+'<h2 class="disp" style="font-size:30px">Ainda trancada</h2><p class="muted">A semana '+w+' abre no domingo, '+fmtDate(openAt(w))+'.</p></div>';}
+ if(!isOpen(w)){return h+'<div class="card stack" style="align-items:flex-start">'+ic('lock')+'<h2 class="disp" style="font-size:30px">Ainda trancada</h2><p class="muted">A semana '+w+' abre no domingo, '+fmtDate(openAt(w))+'.</p></div>'+groupBtn();}
  var missed=0;for(var p=1;p<cw;p++)for(var q=0;q<3;q++)if(!S.marks[p+'-'+q])missed++;
  if(!ended&&w===cw&&cw>1&&missed>=3)h+='<p class="note">'+ic('info')+'<span>Você tem treinos de semanas anteriores sem marcar. Recomendamos fazer a semana em que você parou antes de seguir. A escolha é sua.</span></p>';
  h+='<p class="wkpts">'+ic('rank')+'<span>Esta semana: <b>'+pointedThisWeek()+' de 3</b> treinos pontuados</span></p>'+(V.flash?'<p class="note" role="status">'+ic('info')+'<span>'+V.flash+'</span></p>':'')+groupBtn();

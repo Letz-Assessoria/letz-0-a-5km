@@ -592,3 +592,13 @@ test('perfil: bloco "Fale com a gente" mostra o WhatsApp da assessoria e, quando
   await expect(page.locator('a.wa[href^="https://wa.me/5587999990000?text="]')).toBeVisible();
   await db.doc('config/app').set({ grupo: '', wa: '' }, { merge: true });
 });
+
+test('semana trancada: o botão do grupo aparece em Treinos mesmo antes de abrir', async ({ page }) => {
+  await setStart(Date.now() + 3 * 864e5);
+  await db.doc('config/app').set({ grupo: 'https://chat.whatsapp.com/abc123' }, { merge: true });
+  const a = await makeAthlete();
+  await login(page, a);
+  await expect(page.getByText('Ainda trancada')).toBeVisible();
+  await expect(page.locator('a.grp[href="https://chat.whatsapp.com/abc123"]')).toBeVisible();
+  await db.doc('config/app').set({ grupo: '' }, { merge: true });
+});
