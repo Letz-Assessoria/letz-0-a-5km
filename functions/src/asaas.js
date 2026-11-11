@@ -108,11 +108,11 @@ function createClient({ baseUrl, apiKey, fetchImpl } = {}) {
     try {
       data = await request('POST', '/checkouts', body);
     } catch (err) {
-      // CEP ou endereço recusado (ex.: CEP geral da cidade, 55290-000): sem o endereço o checkout abre e o
-      // aluno paga do mesmo jeito. O endereço segue salvo no nosso perfil (a medalha usa o nosso).
+      // CEP ou endereço recusado (ex.: CEP geral da cidade, 55290-000). O Asaas não aceita customerData sem
+      // endereço completo, então o checkout abre sem customerData e o aluno preenche os dados na página do
+      // Asaas. O endereço segue salvo no nosso perfil (a medalha usa o nosso).
       if (!(err instanceof AsaasError) || err.status !== 400 || !body.customerData || !ADDRESS_REJECTED.test(err.message)) throw err;
-      const { address, addressNumber, complement, postalCode, province, city, ...rest } = body.customerData;
-      body.customerData = rest;
+      delete body.customerData;
       data = await request('POST', '/checkouts', body);
     }
     if (!data || !data.id || !data.link) throw new AsaasError('Asaas POST /checkouts: resposta sem id/link', 502);

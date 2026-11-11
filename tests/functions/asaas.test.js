@@ -101,7 +101,7 @@ describe('createCheckout', () => {
     });
   });
 
-  it('createCheckout com CEP recusado pelo Asaas tenta de novo sem o endereço e mantém nome, CPF, e-mail e celular', async () => {
+  it('createCheckout com CEP recusado pelo Asaas tenta de novo sem customerData (o aluno preenche no Asaas)', async () => {
     const calls = [];
     const ok = { id: 'co-2', link: 'https://sandbox.asaas.com/000/checkoutSession/show/co-2', status: 'ACTIVE' };
     const impl = async (url, init) => {
@@ -119,7 +119,8 @@ describe('createCheckout', () => {
     assert.equal(out.id, 'co-2');
     assert.equal(calls.length, 2);
     assert.equal(calls[0].customerData.postalCode, '55290000');
-    assert.deepEqual(calls[1].customerData, { name: 'Aluna', cpfCnpj: '12345678909', email: 'a@exemplo.com', phone: '87999990000' });
+    assert.equal(calls[1].customerData, undefined);
+    assert.equal(calls[1].externalReference, 'uid-123');
   });
 
   it('createCheckout não repete a chamada em erro 400 que não é de endereço', async () => {
