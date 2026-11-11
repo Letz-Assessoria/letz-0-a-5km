@@ -16,6 +16,9 @@ function itemImageBase64() {
   return itemImage;
 }
 
+// Erro 400 do Asaas sobre o endereço do customerData (CEP, rua, bairro, cidade).
+const ADDRESS_REJECTED = /postalCode|addressNumber|address|province|city|CEP|endere[cç]o|bairro|cidade/i;
+
 class AsaasError extends Error {
   constructor(message, status, errors) {
     super(message);
@@ -101,7 +104,17 @@ function createClient({ baseUrl, apiKey, fetchImpl } = {}) {
     if (customerData) body.customerData = customerData;
 
     const createdAt = Date.now();
-    const data = await request('POST', '/checkouts', body);
+    let data;
+    try {
+      data = await request('POST', '/checkouts', body);
+    } catch (err) {
+      // CEP ou endereço recusado (ex.: CEP geral da cidade, 55290-000): sem o endereço o checkout abre e o
+      // aluno paga do mesmo jeito. O endereço segue salvo no nosso perfil (a medalha usa o nosso).
+      if (!(err instanceof AsaasError) || err.status !== 400 || !body.customerData || !ADDRESS_REJECTED.test(err.message)) throw err;
+      const { address, addressNumber, complement, postalCode, province, city, ...rest } = body.customerData;
+      body.customerData = rest;
+      data = await request('POST', '/checkouts', body);
+    }
     if (!data || !data.id || !data.link) throw new AsaasError('Asaas POST /checkouts: resposta sem id/link', 502);
     return {
       id: data.id,

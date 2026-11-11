@@ -101,6 +101,38 @@ describe('createCheckout', () => {
     });
   });
 
+  it('createCheckout com CEP recusado pelo Asaas tenta de novo sem o endereço e mantém nome, CPF, e-mail e celular', async () => {
+    const calls = [];
+    const ok = { id: 'co-2', link: 'https://sandbox.asaas.com/000/checkoutSession/show/co-2', status: 'ACTIVE' };
+    const impl = async (url, init) => {
+      calls.push(JSON.parse(init.body));
+      const bad = calls.length === 1;
+      const body = bad ? { errors: [{ code: 'invalid_postalCode', description: 'O campo postalCode é inválido.' }] } : ok;
+      return new Response(JSON.stringify(body), { status: bad ? 400 : 200, headers: { 'content-type': 'application/json' } });
+    };
+    const client = createClient({ baseUrl: BASE, apiKey: KEY, fetchImpl: impl });
+    const customerData = {
+      name: 'Aluna', cpfCnpj: '12345678909', email: 'a@exemplo.com', phone: '87999990000',
+      address: 'Rua A', addressNumber: '20', complement: 'casa', province: 'Centro', postalCode: '55290000', city: 'Garanhuns',
+    };
+    const out = await client.createCheckout({ ...CHECKOUT_ARGS, customerData });
+    assert.equal(out.id, 'co-2');
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].customerData.postalCode, '55290000');
+    assert.deepEqual(calls[1].customerData, { name: 'Aluna', cpfCnpj: '12345678909', email: 'a@exemplo.com', phone: '87999990000' });
+  });
+
+  it('createCheckout não repete a chamada em erro 400 que não é de endereço', async () => {
+    let n = 0;
+    const impl = async () => {
+      n++;
+      return new Response(JSON.stringify({ errors: [{ code: 'invalid_cpfCnpj', description: 'O CPF informado é inválido.' }] }), { status: 400, headers: { 'content-type': 'application/json' } });
+    };
+    const client = createClient({ baseUrl: BASE, apiKey: KEY, fetchImpl: impl });
+    await assert.rejects(client.createCheckout({ ...CHECKOUT_ARGS, customerData: { name: 'A', cpfCnpj: '1', email: 'a@b.c', phone: '1', postalCode: '1' } }), /CPF/);
+    assert.equal(n, 1);
+  });
+
   it('createCheckout recusa parcelas fora de 1..12 e valor inválido', async () => {
     const { impl, calls } = fakeFetch({});
     const client = createClient({ baseUrl: BASE, apiKey: KEY, fetchImpl: impl });
