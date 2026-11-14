@@ -86,6 +86,9 @@ describe('firestore.rules', () => {
   it('users: aluno não altera access, points nem done', async () => {
     const ref = doc(db(ALICE), 'users', ALICE);
     await assertSucceeds(updateDoc(ref, { name: 'Alice B', photoURL: FS_URL, profiled: true, welcomed: true }));
+    await assertSucceeds(updateDoc(ref, { welcomed: true, level: '1km' }));
+    await assertSucceeds(updateDoc(ref, { level: 'zero' }));
+    await assertFails(updateDoc(ref, { level: 'avancado' }));
     await assertFails(updateDoc(ref, { access: 'blocked' }));
     await assertFails(updateDoc(ref, { points: 999 }));
     await assertFails(updateDoc(ref, { done: 30 }));

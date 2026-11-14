@@ -41,7 +41,7 @@ async function withProfile(u, extra = {}) {
 const row = (page, text) => page.locator('tr', { hasText: text });
 
 test('liberar acesso manual leva aluno pendente ao app', async ({ page, browser }) => {
-  const s = await makeUser('pending', { profiled: true, welcomed: true, handle: uniqueHandle() });
+  const s = await makeUser('pending', { profiled: true, welcomed: true, level: 'zero', handle: uniqueHandle() });
   await withProfile(s);
   await coachPanel(page, 'Atletas');
   const r = row(page, s.email);

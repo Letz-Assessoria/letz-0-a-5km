@@ -118,7 +118,7 @@ test.describe('guia de instalação para aluno ativo', () => {
   });
 
   test('rotas protegidas levam ao guia uma vez e não prendem', async ({ page }) => {
-    const u = await makeUser('active', { profiled: true, welcomed: true });
+    const u = await makeUser('active', { profiled: true, welcomed: true, level: 'zero' });
     await enter(page, u);
     await expect(page).toHaveURL(/#\/instalar$/);
     await page.goto('/#/app/feed');
@@ -133,7 +133,7 @@ test.describe('guia de instalação para aluno ativo', () => {
 
   test('#/instalar de propósito mostra Voltar e volta ao app', async ({ page }) => {
     await skipGuide(page);
-    const u = await makeUser('active', { profiled: true, welcomed: true });
+    const u = await makeUser('active', { profiled: true, welcomed: true, level: 'zero' });
     await enter(page, u);
     await expect(page).toHaveURL(/#\/app\/treinos$/);
     await page.goto('/#/instalar');

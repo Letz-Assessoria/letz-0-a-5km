@@ -134,7 +134,7 @@ export function uniqueHandle() {
 // Aluno ativo com perfil pronto (handle reservado, boas-vindas vistas).
 export async function makeAthlete(extra = {}) {
   const handle = extra.handle || uniqueHandle();
-  const u = await makeUser('active', { profiled: true, welcomed: true, handle, ...extra });
+  const u = await makeUser('active', { profiled: true, welcomed: true, level: 'zero', handle, ...extra });
   await db.doc('handles/' + handle).set({ uid: u.uid });
   return { ...u, handle };
 }

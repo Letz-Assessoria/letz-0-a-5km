@@ -59,7 +59,7 @@ test('perfil com foto salva e aparece no feed de outro aluno', async ({ page, br
   await page.locator('#in-photo').setInputFiles(await jpeg(page, 600, 400));
   await page.getByLabel('Seu @').fill(handle);
   await page.getByRole('button', { name: /Salvar e continuar/ }).click();
-  await expect(page.getByRole('button', { name: /Ok, vamos começar/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Estou começando do zero/ })).toBeVisible();
 
   const u = await waitUntil(async () => {
     const d = (await db.doc('users/' + a.uid).get()).data();
@@ -70,7 +70,7 @@ test('perfil com foto salva e aparece no feed de outro aluno', async ({ page, br
   expect((await db.doc('handles/' + handle).get()).data().uid).toBe(a.uid);
   expect((await storageObject(`avatars/${a.uid}.jpg`)).contentType).toBe('image/jpeg');
 
-  await page.getByRole('button', { name: /Ok, vamos começar/ }).click();
+  await page.getByRole('button', { name: /Estou começando do zero/ }).click();
   await page.getByRole('button', { name: /Marcar como feito/ }).first().click();
   await expect(page.getByText('Feito', { exact: true }).first()).toBeVisible();
 
@@ -216,7 +216,7 @@ async function realStudent() {
   await waitUntil(async () => (await db.doc('users/' + uid).get()).data().access === 'active');
   const handle = uniqueHandle();
   await db.doc('handles/' + handle).set({ uid });
-  await db.doc('users/' + uid).update({ profiled: true, welcomed: true, handle });
+  await db.doc('users/' + uid).update({ profiled: true, welcomed: true, level: 'zero', handle });
   return { ...p, uid, handle };
 }
 
@@ -601,4 +601,22 @@ test('semana trancada: o botão do grupo aparece em Treinos mesmo antes de abrir
   await expect(page.getByText('Ainda trancada')).toBeVisible();
   await expect(page.locator('a.grp[href="https://chat.whatsapp.com/abc123"]')).toBeVisible();
   await db.doc('config/app').set({ grupo: '' }, { merge: true });
+});
+
+test('boas-vindas: escolhe "já corro 1 km", vê o plano 2 e pode trocar', async ({ page }) => {
+  const a = await makeAthlete();
+  await db.doc('users/' + a.uid).update({ level: admin.firestore.FieldValue.delete() });
+  await login(page, a);
+  // sem nível escolhido, o aluno cai nas boas-vindas antes dos treinos
+  await expect(page).toHaveURL(/#\/boas-vindas$/);
+  await page.getByRole('button', { name: /Já corro 1 km sem parar/ }).click();
+  await expect(page).toHaveURL(/#\/app\/treinos$/);
+  await expect(page.getByText('Seu plano:')).toContainText('Já corro 1 km');
+  await expect(page.getByText('Faça 5 vezes: corra 3 minutos e caminhe 1 minuto.')).toBeVisible();
+  await waitUntil(async () => (await db.doc('users/' + a.uid).get()).data().level === '1km');
+
+  await page.getByRole('button', { name: 'Trocar' }).click();
+  await page.getByRole('button', { name: /Estou começando do zero/ }).click();
+  await expect(page.getByText('Faça 6 vezes: corra 1 minuto e caminhe 3 minutos.')).toBeVisible();
+  await waitUntil(async () => (await db.doc('users/' + a.uid).get()).data().level === 'zero');
 });
