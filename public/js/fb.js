@@ -264,9 +264,12 @@ async function saveProfile({ name, handle, photoBlob }) {
 }
 
 // Treinos: um post por treino; a Function soma os pontos.
-async function markWelcomed() {
+// level: ponto de partida escolhido nas boas-vindas ('zero' ou '1km').
+async function markWelcomed(level) {
   const { uid } = mine();
-  await updateDoc(doc(db, 'users', uid), { welcomed: true });
+  const data = { welcomed: true };
+  if (level === 'zero' || level === '1km') data.level = level;
+  await updateDoc(doc(db, 'users', uid), data);
 }
 
 async function markWorkout(w, d) {

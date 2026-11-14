@@ -39,14 +39,15 @@ service cloud.firestore {
           && (!('handle' in c) || (d.handle is string && d.handle.matches('^[a-z0-9._]{3,30}$')))
           && (!('photoURL' in c) || imgUrlOk(d.photoURL))
           && (!('profiled' in c) || d.profiled is bool)
-          && (!('welcomed' in c) || d.welcomed is bool);
+          && (!('welcomed' in c) || d.welcomed is bool)
+          && (!('level' in c) || d.level in ['zero', '1km']);
       }
       allow read: if isOwner(uid) || isActive() || isAdmin();
       // users/{uid} é criado pelas Functions.
       allow create, delete: if false;
       allow update: if
         (isOwner(uid)
-          && changed().hasOnly(['name', 'handle', 'photoURL', 'profiled', 'welcomed'])
+          && changed().hasOnly(['name', 'handle', 'photoURL', 'profiled', 'welcomed', 'level'])
           && profileFieldsOk(request.resource.data)
           && handleReserved())
         || (isAdmin()
